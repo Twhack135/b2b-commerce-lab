@@ -34,6 +34,22 @@ export function IsPrice() {
   );
 }
 
+/** Text with at least one visible character, so "   " is rejected */
+export function IsNotBlank() {
+  return Matches(/\S/, { message: '$property must not be blank' });
+}
+
+/**
+ * A material number must not be blank and must not start or end with
+ * whitespace. It is rejected rather than trimmed, so the key the client
+ * sends is exactly the key that is stored.
+ */
+export function IsMaterialNumber() {
+  return Matches(/^\S(.*\S)?$/s, {
+    message: 'materialNumber must not be blank or start or end with whitespace',
+  });
+}
+
 /** ISO 4217 style currency code, e.g. EUR */
 export function IsCurrencyCode() {
   return Matches(/^[A-Z]{3}$/, {

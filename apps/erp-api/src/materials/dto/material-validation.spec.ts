@@ -30,11 +30,35 @@ describe('CreateMaterialDto validation', () => {
     );
   });
 
+  it.each([['MAT-001'], ['MAT 001'], ['A'], ['100-200/X']])(
+    'should keep the valid material number %p unchanged',
+    async (materialNumber) => {
+      await expect(
+        validate({ ...validCreateBody, materialNumber }, CreateMaterialDto),
+      ).resolves.toMatchObject({ materialNumber });
+    },
+  );
+
+  it('should keep inner and outer spaces of a valid description', async () => {
+    const description = ' Circulation  Pump ';
+
+    await expect(
+      validate({ ...validCreateBody, description }, CreateMaterialDto),
+    ).resolves.toMatchObject({ description });
+  });
+
   it.each([
     ['missing materialNumber', { materialNumber: undefined }],
     ['empty materialNumber', { materialNumber: '' }],
     ['numeric materialNumber', { materialNumber: 3 }],
+    ['whitespace-only materialNumber', { materialNumber: '   ' }],
+    ['tab and newline materialNumber', { materialNumber: '\t\n' }],
+    ['materialNumber with leading space', { materialNumber: ' MAT-003' }],
+    ['materialNumber with trailing space', { materialNumber: 'MAT-003 ' }],
+    ['materialNumber with trailing newline', { materialNumber: 'MAT-003\n' }],
     ['empty description', { description: '' }],
+    ['whitespace-only description', { description: '   ' }],
+    ['tab and newline description', { description: '\t\n' }],
     ['missing description', { description: undefined }],
     ['price as text', { price: '349.99' }],
     ['zero price', { price: 0 }],
@@ -68,6 +92,7 @@ describe('UpdateMaterialDto validation', () => {
   it.each([
     ['changing the materialNumber', { materialNumber: 'MAT-999' }],
     ['empty description', { description: '' }],
+    ['whitespace-only description', { description: '   ' }],
     ['null description', { description: null }],
     ['price with three decimals', { price: 399.999 }],
     ['negative price', { price: -5 }],

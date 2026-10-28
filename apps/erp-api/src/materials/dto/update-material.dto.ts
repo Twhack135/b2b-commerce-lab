@@ -1,5 +1,5 @@
-import { IsNotEmpty, IsString, ValidateIf } from 'class-validator';
-import { IsCurrencyCode, IsPrice } from './material-validators';
+import { IsString, ValidateIf } from 'class-validator';
+import { IsCurrencyCode, IsNotBlank, IsPrice } from './material-validators';
 
 // Skip validation only when a field is missing. Unlike @IsOptional(),
 // this still rejects an explicit null, which the database would not accept.
@@ -10,7 +10,7 @@ const IfPresent = () => ValidateIf((_object, value) => value !== undefined);
 export class UpdateMaterialDto {
   @IfPresent()
   @IsString()
-  @IsNotEmpty()
+  @IsNotBlank()
   description?: string;
 
   @IfPresent()
