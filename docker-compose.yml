@@ -1,0 +1,24 @@
+name: b2b-commerce-lab
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: b2b_erp
+      POSTGRES_USER: erp_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      # Only reachable from this computer, not from the network
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # PostgreSQL 18+ stores its data below /var/lib/postgresql
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres_data:
