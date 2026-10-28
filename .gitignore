@@ -6,6 +6,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# Generated Prisma Client (recreate with: npx prisma generate)
+apps/erp-api/src/generated/
+
 # Test coverage
 coverage/
 

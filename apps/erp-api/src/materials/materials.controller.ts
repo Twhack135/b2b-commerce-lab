@@ -7,7 +7,7 @@ export class MaterialsController {
   constructor(private readonly materialsService: MaterialsService) {}
 
   @Get()
-  findAll(): Material[] {
+  findAll(): Promise<Material[]> {
     return this.materialsService.findAll();
   }
 }

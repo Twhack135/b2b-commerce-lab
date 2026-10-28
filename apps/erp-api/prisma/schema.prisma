@@ -1,0 +1,22 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // Extensionless imports work with ts-node, Jest and the Nest build
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Table and column names in PostgreSQL use lowercase snake_case,
+// so they can be queried in SQL without quotes
+model Material {
+  materialNumber String  @id @map("material_number")
+  description    String
+  price          Decimal @db.Decimal(12, 2)
+  currency       String  @db.Char(3)
+
+  @@map("materials")
+}
