@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+/* Design tokens: one place for the backoffice colors and fonts */
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-shell: #14213d; /* sidebar */
+  --color-shell-muted: #23345a;
+  --color-canvas: #f4f6f9; /* page background */
+  --color-surface: #ffffff; /* cards, tables, panels */
+  --color-line: #dfe3ea; /* borders */
+  --color-ink: #1b2533; /* main text */
+  --color-ink-muted: #5b6676; /* secondary text */
+  --color-brand: #0b6bcb; /* primary actions, links */
+  --color-brand-strong: #0957a6;
+  --color-brand-soft: #e7f1fb;
+  --color-danger: #c62828;
+  --color-danger-soft: #fdecec;
+  --color-success: #1e7d45;
+  --color-success-soft: #e8f5ed;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
