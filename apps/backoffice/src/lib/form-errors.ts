@@ -22,21 +22,30 @@ export function fieldOfMessage<Field extends string>(
 
 /**
  * Messages for known fields are shown at that field (first one wins);
- * all other messages are returned separately.
+ * all other messages are returned separately. With `labels`, a message that
+ * starts with the API field name gets a readable label instead, e.g.
+ * "unitId U1 is inactive" -> "B2B unit U1 is inactive."
  */
 export function splitValidationMessages<Field extends string>(
   messages: string[],
   fields: readonly Field[],
+  labels: Partial<Record<Field, string>> = {},
 ) {
   const fieldErrors: Partial<Record<Field, string>> = {};
   const otherMessages: string[] = [];
 
   for (const message of messages) {
     const field = fieldOfMessage(message, fields);
+    const label = field && labels[field];
+    const text = toSentence(
+      label && message.startsWith(`${field} `)
+        ? label + message.slice(field.length)
+        : message,
+    );
     if (!field) {
-      otherMessages.push(toSentence(message));
+      otherMessages.push(text);
     } else if (!fieldErrors[field]) {
-      fieldErrors[field] = toSentence(message);
+      fieldErrors[field] = text;
     }
   }
 

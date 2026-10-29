@@ -32,6 +32,12 @@ const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
   { method: "GET", path: ["b2b-units", ":unitId"] },
   { method: "POST", path: ["b2b-units"] },
   { method: "PATCH", path: ["b2b-units", ":unitId"] },
+  { method: "GET", path: ["price-conditions"] },
+  { method: "GET", path: ["price-conditions", ":conditionId"] },
+  { method: "POST", path: ["price-conditions"] },
+  { method: "PATCH", path: ["price-conditions", ":conditionId"] },
+  // Calculates only; POST because query strings are not forwarded
+  { method: "POST", path: ["pricing", "price"] },
 ];
 
 /** Read at request time; never taken from the incoming request */

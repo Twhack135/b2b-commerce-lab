@@ -22,7 +22,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Materials", href: "/materials", icon: BoxIcon },
   { label: "Customers", href: "/customers", icon: UsersIcon },
   { label: "B2B Units", href: "/b2b-units", icon: BuildingIcon },
-  { label: "Pricing", icon: TagIcon },
+  { label: "Pricing", href: "/pricing", icon: TagIcon },
   { label: "Inventory", icon: WarehouseIcon },
   { label: "Sales Orders", icon: CartIcon },
 ];

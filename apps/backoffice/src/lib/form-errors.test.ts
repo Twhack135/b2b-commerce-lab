@@ -97,3 +97,32 @@ describe("fieldOfMessage", () => {
     assert.equal(fieldOfMessage("Customer account X was changed at the same time.", fields), undefined);
   });
 });
+
+describe("splitValidationMessages with labels", () => {
+  const fields = ["unitId", "amount", "validTo"] as const;
+
+  it("replaces the API field name with a readable label", () => {
+    const result = splitValidationMessages(
+      ["unitId UNIT-MUENCHEN is inactive", "amount must be greater than 0"],
+      fields,
+      { unitId: "B2B unit" },
+    );
+
+    assert.deepEqual(result.fieldErrors, {
+      unitId: "B2B unit UNIT-MUENCHEN is inactive.",
+      amount: "Amount must be greater than 0.",
+    });
+  });
+
+  it("keeps messages that do not start with the field name", () => {
+    const result = splitValidationMessages(
+      ["currency must be EUR, the currency of material MAT-002"],
+      fields,
+      { unitId: "B2B unit" },
+    );
+
+    assert.deepEqual(result.otherMessages, [
+      "Currency must be EUR, the currency of material MAT-002.",
+    ]);
+  });
+});

@@ -164,6 +164,51 @@ describe("allowed routes are forwarded", () => {
     });
   }
 
+  // Sprint 7A endpoints
+  const conditionBody = {
+    materialNumber: "MAT-002",
+    scope: "B2B_UNIT",
+    unitId: "UNIT-STUTTGART",
+    amount: "189.00",
+    currency: "EUR",
+    validFrom: "2026-11-01",
+    validTo: null,
+  };
+
+  for (const [method, path, body, status] of [
+    ["GET", ["price-conditions"], undefined, 200],
+    ["GET", ["price-conditions", "7"], undefined, 200],
+    ["POST", ["price-conditions"], conditionBody, 201],
+    ["PATCH", ["price-conditions", "7"], { amount: "185.50", isActive: false }, 200],
+    ["POST", ["pricing", "price"], { materialNumber: "MAT-002", unitId: "UNIT-STUTTGART", pricingDate: "2026-11-15", quantity: 3 }, 200],
+  ] as const) {
+    it(`${method} /${path.join("/")}`, async () => {
+      const fetchMock = mockUpstream(upstreamJson(status, {}));
+
+      const response = await call(method, [...path], body);
+
+      assert.equal(response.status, status);
+      const { url, init } = upstreamCall(fetchMock);
+      assert.equal(url, `http://erp.test:3000/${path.join("/")}`);
+      assert.equal(init.method, method);
+      assert.deepEqual(
+        init.body === undefined ? undefined : JSON.parse(String(init.body)),
+        body,
+      );
+    });
+  }
+
+  it("passes amounts through as exact strings", async () => {
+    const fetchMock = mockUpstream(
+      upstreamJson(200, { unitPrice: "0.10", netValue: "9999.90" }),
+    );
+
+    const response = await call("POST", ["pricing", "price"], { amount: "0.10" });
+
+    assert.deepEqual(await response.json(), { unitPrice: "0.10", netValue: "9999.90" });
+    assert.equal(String(upstreamCall(fetchMock).init.body), '{"amount":"0.10"}');
+  });
+
   it("encodes the account number inside the members path", async () => {
     const fetchMock = mockUpstream(upstreamJson(200, {}));
 
@@ -236,6 +281,14 @@ describe("blocked routes are never forwarded", () => {
     ["GET", ["b2b-units", ".."]],
     ["GET", ["customer-account-members"]],
     ["GET", ["b2b-unit-ship-tos"]],
+    // Sprint 7A resources: only the exact implemented paths
+    ["POST", ["pricing"]],
+    ["POST", ["pricing", "simulate"]],
+    ["POST", ["pricing", "price", "MAT-002"]],
+    ["GET", ["price-conditions", "7", "history"]],
+    ["GET", ["price-conditions", ".."]],
+    ["PATCH", ["price-conditions", ""]],
+    ["GET", ["price-condition"]],
   ] as const) {
     it(`${method} /${path.join("/")} -> 404`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));
@@ -278,6 +331,16 @@ describe("blocked methods are never forwarded", () => {
     ["PATCH", ["b2b-units"], "GET, POST"],
     ["PUT", ["b2b-units"], "GET, POST"],
     ["DELETE", ["b2b-units"], "GET, POST"],
+    // Sprint 7A resources: no DELETE, no PUT, the price check only by POST
+    ["DELETE", ["price-conditions", "7"], "GET, PATCH"],
+    ["PUT", ["price-conditions", "7"], "GET, PATCH"],
+    ["POST", ["price-conditions", "7"], "GET, PATCH"],
+    ["PATCH", ["price-conditions"], "GET, POST"],
+    ["DELETE", ["price-conditions"], "GET, POST"],
+    ["GET", ["pricing", "price"], "POST"],
+    ["PUT", ["pricing", "price"], "POST"],
+    ["PATCH", ["pricing", "price"], "POST"],
+    ["DELETE", ["pricing", "price"], "POST"],
   ] as const) {
     it(`${method} /${path.join("/")} -> 405`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));
