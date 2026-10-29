@@ -7,5 +7,7 @@ import { PricingService } from './pricing.service';
   imports: [PrismaModule],
   controllers: [PricingController],
   providers: [PricingService],
+  // Used by the order simulation to price several positions at once
+  exports: [PricingService],
 })
 export class PricingModule {}

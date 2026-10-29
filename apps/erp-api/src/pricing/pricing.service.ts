@@ -1,11 +1,17 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { fromDbDate } from '../common/dates';
 import { formatAmount } from '../common/money';
+import { Material, PriceCondition, Prisma } from '../generated/prisma/client';
 import { PriceConditionScope } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalculatePriceDto } from './dto/calculate-price.dto';
-import { determinePrice } from './price-determination';
-import { PriceResult } from './price-result.interface';
+import {
+  ConditionCandidate,
+  Determination,
+  determinePrice,
+  PricingStep,
+} from './price-determination';
+import { PriceResult, PriceResultStep } from './price-result.interface';
 
 @Injectable()
 export class PricingService {
@@ -63,15 +69,7 @@ export class PricingService {
       quantity,
       basePrice: material.price,
       currency: material.currency,
-      candidates: conditions.map((c) => ({
-        conditionId: c.conditionId,
-        scope: c.scope,
-        amount: c.amount,
-        currency: c.currency,
-        validFrom: fromDbDate(c.validFrom),
-        validTo: c.validTo && fromDbDate(c.validTo),
-        isActive: c.isActive,
-      })),
+      candidates: conditions.map(toCandidate),
     });
 
     return {
@@ -88,12 +86,101 @@ export class PricingService {
       conditionId: result.condition?.conditionId ?? null,
       validFrom: result.condition?.validFrom ?? null,
       validTo: result.condition?.validTo ?? null,
-      steps: result.steps.map((step) => ({
-        source: step.source,
-        conditionId: step.conditionId,
-        amount: step.amount && formatAmount(step.amount),
-        applied: step.applied,
-      })),
+      steps: toResultSteps(result.steps),
     };
   }
+
+  /**
+   * Prices several positions with three queries in total, however many
+   * positions there are: the materials, and the active conditions of these
+   * materials for the unit and its Sold-to. Every position is then priced on
+   * its own by determinePrice, also if a material occurs more than once.
+   *
+   * Unlike calculate(), this does not check whether the unit or its
+   * partners are active; the caller (e.g. the order simulation) decides
+   * what to report. Pass a transaction client to read inside a transaction.
+   * Without a unit (null), only the materials are looked up.
+   */
+  async priceItems(
+    request: {
+      unit: { unitId: string; soldToCustomerNumber: string } | null;
+      pricingDate: string;
+      items: { materialNumber: string; quantity: number }[];
+    },
+    db: Db = this.prisma,
+  ): Promise<ItemPricing[]> {
+    const materialNumbers = [
+      ...new Set(request.items.map((item) => item.materialNumber)),
+    ];
+    // One after the other: a transaction client has a single connection
+    const materials = await db.material.findMany({
+      where: { materialNumber: { in: materialNumbers } },
+    });
+    const { unit } = request;
+    const conditions = unit
+      ? await db.priceCondition.findMany({
+          where: {
+            materialNumber: { in: materials.map((m) => m.materialNumber) },
+            isActive: true,
+            OR: [
+              { scope: PriceConditionScope.B2B_UNIT, unitId: unit.unitId },
+              {
+                scope: PriceConditionScope.SOLD_TO,
+                soldToCustomerNumber: unit.soldToCustomerNumber,
+              },
+            ],
+          },
+        })
+      : [];
+
+    return request.items.map((item) => {
+      const material =
+        materials.find((m) => m.materialNumber === item.materialNumber) ?? null;
+      if (!material || !unit) return { material, determination: null };
+      return {
+        material,
+        determination: determinePrice({
+          pricingDate: request.pricingDate,
+          quantity: item.quantity,
+          basePrice: material.price,
+          currency: material.currency,
+          candidates: conditions
+            .filter((c) => c.materialNumber === material.materialNumber)
+            .map(toCandidate),
+        }),
+      };
+    });
+  }
+}
+
+type Db = Prisma.TransactionClient | PrismaService;
+
+/** Result of priceItems for one position, in request order */
+export interface ItemPricing {
+  /** null if the material does not exist */
+  material: Material | null;
+  /** null without material or unit */
+  determination: Determination | null;
+}
+
+function toCandidate(condition: PriceCondition): ConditionCandidate {
+  return {
+    conditionId: condition.conditionId,
+    scope: condition.scope,
+    amount: condition.amount,
+    currency: condition.currency,
+    validFrom: fromDbDate(condition.validFrom),
+    validTo: condition.validTo && fromDbDate(condition.validTo),
+    isActive: condition.isActive,
+  };
+}
+
+/** Steps with amounts as decimal strings, as in the pricing API */
+export function toResultSteps(steps: PricingStep[]): PriceResultStep[] {
+  return steps.map((step) => ({
+    source: step.source,
+    conditionId: step.conditionId,
+    amount: step.amount && formatAmount(step.amount),
+    applied: step.applied,
+  }));
 }

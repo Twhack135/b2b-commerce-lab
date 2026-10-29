@@ -195,3 +195,119 @@ describe('PricingService', () => {
     await expect422(['unitId UNIT-S has an inactive Sold-to CUST-1000']);
   });
 });
+
+// Batch pricing for the order simulation; calculate() above is unchanged
+describe('PricingService.priceItems', () => {
+  const thermostat = {
+    materialNumber: 'MAT-002',
+    description: 'Thermostat',
+    price: new Prisma.Decimal('199'),
+    currency: 'EUR',
+  };
+  const batchDb = {
+    material: { findMany: jest.fn() },
+    priceCondition: { findMany: jest.fn() },
+  };
+  const service = new PricingService(batchDb as never);
+  const stuttgart = { unitId: 'UNIT-S', soldToCustomerNumber: 'CUST-1000' };
+  const soldToThermostat = {
+    ...soldToCondition,
+    materialNumber: 'MAT-002',
+    amount: new Prisma.Decimal('189.5'),
+  };
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    batchDb.material.findMany.mockResolvedValue([material, thermostat]);
+    batchDb.priceCondition.findMany.mockResolvedValue([
+      { ...unitCondition, materialNumber: 'MAT-001' },
+      soldToThermostat,
+    ]);
+  });
+
+  const price = (items: { materialNumber: string; quantity: number }[]) =>
+    service.priceItems({ unit: stuttgart, pricingDate: '2026-11-15', items });
+
+  it('loads materials and conditions once for all positions', async () => {
+    await price([
+      { materialNumber: 'MAT-001', quantity: 2 },
+      { materialNumber: 'MAT-002', quantity: 10 },
+      { materialNumber: 'MAT-002', quantity: 5 },
+    ]);
+
+    expect(batchDb.material.findMany).toHaveBeenCalledTimes(1);
+    expect(batchDb.material.findMany).toHaveBeenCalledWith({
+      where: { materialNumber: { in: ['MAT-001', 'MAT-002'] } },
+    });
+    expect(batchDb.priceCondition.findMany).toHaveBeenCalledTimes(1);
+    expect(batchDb.priceCondition.findMany).toHaveBeenCalledWith({
+      where: {
+        materialNumber: { in: ['MAT-001', 'MAT-002'] },
+        isActive: true,
+        OR: [
+          { scope: 'B2B_UNIT', unitId: 'UNIT-S' },
+          { scope: 'SOLD_TO', soldToCustomerNumber: 'CUST-1000' },
+        ],
+      },
+    });
+  });
+
+  it('prices every position on its own with the conditions of its material', async () => {
+    const result = await price([
+      { materialNumber: 'MAT-001', quantity: 2 },
+      { materialNumber: 'MAT-002', quantity: 10 },
+      { materialNumber: 'MAT-002', quantity: 5 },
+    ]);
+
+    expect(
+      result.map((r) => [
+        r.material?.materialNumber,
+        r.determination?.source,
+        r.determination?.unitPrice.toFixed(2),
+        r.determination?.netValue.toFixed(2),
+      ]),
+    ).toEqual([
+      ['MAT-001', 'B2B_UNIT', '4200.00', '8400.00'],
+      ['MAT-002', 'SOLD_TO', '189.50', '1895.00'],
+      ['MAT-002', 'SOLD_TO', '189.50', '947.50'],
+    ]);
+  });
+
+  it('returns no price for an unknown material', async () => {
+    batchDb.material.findMany.mockResolvedValue([material]);
+
+    const result = await price([{ materialNumber: 'NOPE', quantity: 1 }]);
+
+    expect(result).toEqual([{ material: null, determination: null }]);
+  });
+
+  it('only looks up the materials without a unit', async () => {
+    const result = await service.priceItems({
+      unit: null,
+      pricingDate: '2026-11-15',
+      items: [{ materialNumber: 'MAT-001', quantity: 1 }],
+    });
+
+    expect(batchDb.priceCondition.findMany).not.toHaveBeenCalled();
+    expect(result).toEqual([{ material, determination: null }]);
+  });
+
+  it('reads through the given transaction client', async () => {
+    const tx = {
+      material: { findMany: jest.fn().mockResolvedValue([]) },
+      priceCondition: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+
+    await service.priceItems(
+      {
+        unit: stuttgart,
+        pricingDate: '2026-11-15',
+        items: [{ materialNumber: 'MAT-001', quantity: 1 }],
+      },
+      tx as never,
+    );
+
+    expect(tx.material.findMany).toHaveBeenCalled();
+    expect(batchDb.material.findMany).not.toHaveBeenCalled();
+  });
+});

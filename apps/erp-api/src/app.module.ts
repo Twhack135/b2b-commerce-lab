@@ -7,6 +7,7 @@ import { CustomersModule } from './customers/customers.module';
 import { MaterialsModule } from './materials/materials.module';
 import { PriceConditionsModule } from './price-conditions/price-conditions.module';
 import { PricingModule } from './pricing/pricing.module';
+import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { PricingModule } from './pricing/pricing.module';
     B2bUnitsModule,
     PriceConditionsModule,
     PricingModule,
+    SalesOrdersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

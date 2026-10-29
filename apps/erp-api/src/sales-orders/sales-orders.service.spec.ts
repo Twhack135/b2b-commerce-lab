@@ -1,0 +1,222 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { Prisma } from '../generated/prisma/client';
+import { PricingService } from '../pricing/pricing.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { SimulateSalesOrderDto } from './dto/simulate-sales-order.dto';
+import { SalesOrdersService } from './sales-orders.service';
+
+const d = (value: string) => new Prisma.Decimal(value);
+
+const member = (customerNumber: string) => ({
+  customer: {
+    customerNumber,
+    name: `Customer ${customerNumber}`,
+    isActive: true,
+  },
+});
+
+const unitRecord = {
+  unitId: 'UNIT-STUTTGART',
+  name: 'Müller – Stuttgart',
+  isActive: true,
+  soldToCustomerNumber: 'CUST-1000',
+  soldTo: { ...member('CUST-1000'), owner: member('CUST-1000') },
+  billTo: member('CUST-1000'),
+  payer: member('CUST-1000'),
+  shipTos: [
+    {
+      customerNumber: 'CUST-1100',
+      isDefault: true,
+      member: member('CUST-1100'),
+    },
+  ],
+};
+
+const priced = (
+  materialNumber: string,
+  unitPrice: string,
+  quantity: number,
+) => ({
+  material: {
+    materialNumber,
+    description: materialNumber,
+    price: d(unitPrice),
+    currency: 'EUR',
+  },
+  determination: {
+    source: 'BASE_PRICE' as const,
+    condition: null,
+    unitPrice: d(unitPrice),
+    netValue: d(unitPrice).mul(quantity),
+    currency: 'EUR',
+    steps: [],
+  },
+});
+
+const request = {
+  unitId: 'UNIT-STUTTGART',
+  pricingDate: '2026-11-15',
+  items: [
+    { materialNumber: 'MAT-001', quantity: 2 },
+    { materialNumber: 'MAT-002', quantity: 10 },
+  ],
+} satisfies SimulateSalesOrderDto;
+
+describe('SalesOrdersService', () => {
+  let service: SalesOrdersService;
+
+  const tx = {
+    $executeRaw: jest.fn(),
+    b2bUnit: { findUnique: jest.fn() },
+  };
+  const prisma = { $transaction: jest.fn() };
+  const pricing = { priceItems: jest.fn() };
+
+  beforeEach(async () => {
+    jest.resetAllMocks();
+    prisma.$transaction.mockImplementation(
+      (work: (client: typeof tx) => unknown) => work(tx),
+    );
+    tx.b2bUnit.findUnique.mockResolvedValue(unitRecord);
+    pricing.priceItems.mockResolvedValue([
+      priced('MAT-001', '4500.00', 2),
+      priced('MAT-002', '189.50', 10),
+    ]);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SalesOrdersService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: PricingService, useValue: pricing },
+      ],
+    }).compile();
+    service = module.get(SalesOrdersService);
+  });
+
+  it('reads in one read-only REPEATABLE READ transaction', async () => {
+    await service.simulate(request);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'RepeatableRead',
+    });
+    // READ ONLY is the first statement of the transaction
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(
+      (tx.$executeRaw.mock.calls[0] as [TemplateStringsArray])[0].join(''),
+    ).toBe('SET TRANSACTION READ ONLY');
+    expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.b2bUnit.findUnique.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('prices all positions with one batch call inside the transaction', async () => {
+    await service.simulate(request);
+
+    expect(pricing.priceItems).toHaveBeenCalledTimes(1);
+    expect(pricing.priceItems).toHaveBeenCalledWith(
+      { unit: unitRecord, pricingDate: '2026-11-15', items: request.items },
+      tx,
+    );
+  });
+
+  it('returns a VALID simulation with the exact total', async () => {
+    const result = await service.simulate(request);
+
+    expect(result).toMatchObject({
+      simulated: true,
+      status: 'VALID',
+      requestedShippingMethod: 'STANDARD',
+      customerReference: null,
+      customerNote: null,
+      requiresSalesReview: false,
+      proposedOrderBlock: null,
+      totals: { netValue: '10895.00', currency: 'EUR' },
+      messages: [],
+    });
+    expect(result.items.map((i) => [i.itemNumber, i.netValue])).toEqual([
+      [10, '9000.00'],
+      [20, '1895.00'],
+    ]);
+  });
+
+  it('turns a note into a warning with a proposed delivery block', async () => {
+    const result = await service.simulate({
+      ...request,
+      customerNote: 'Bitte nur über Tor 3 anliefern.',
+      customerReference: 'PO-STR-2026-118',
+    });
+
+    expect(result).toMatchObject({
+      status: 'VALID_WITH_WARNINGS',
+      customerNote: 'Bitte nur über Tor 3 anliefern.',
+      customerReference: 'PO-STR-2026-118',
+      requiresSalesReview: true,
+      proposedOrderBlock: { type: 'DELIVERY_BLOCK', code: 'SALES_REVIEW' },
+      totals: { netValue: '10895.00' },
+    });
+    expect(result.messages.map((m) => m.code)).toEqual([
+      'SALES_REVIEW_REQUIRED',
+    ]);
+  });
+
+  it('treats a whitespace-only note as no note', async () => {
+    const result = await service.simulate({
+      ...request,
+      customerNote: ' \n\t ',
+    });
+
+    expect(result).toMatchObject({
+      status: 'VALID',
+      customerNote: null,
+      requiresSalesReview: false,
+      proposedOrderBlock: null,
+    });
+  });
+
+  it('keeps the note warning even if the simulation is invalid', async () => {
+    tx.b2bUnit.findUnique.mockResolvedValue(null);
+    pricing.priceItems.mockResolvedValue([
+      { material: null, determination: null },
+      { material: null, determination: null },
+    ]);
+
+    const result = await service.simulate({
+      ...request,
+      unitId: 'NOPE',
+      customerNote: 'x',
+    });
+
+    expect(result.status).toBe('INVALID');
+    expect(result.totals).toBeNull();
+    expect(result.partners).toBeNull();
+    expect(result.requiresSalesReview).toBe(true);
+    expect(result.messages.map((m) => m.code)).toEqual([
+      'UNIT_NOT_FOUND',
+      'SALES_REVIEW_REQUIRED',
+    ]);
+  });
+
+  it('informs about Express and repeated materials without a warning', async () => {
+    pricing.priceItems.mockResolvedValue([
+      priced('MAT-002', '189.50', 10),
+      priced('MAT-002', '189.50', 5),
+    ]);
+
+    const result = await service.simulate({
+      ...request,
+      requestedShippingMethod: 'EXPRESS' as never,
+      items: [
+        { materialNumber: 'MAT-002', quantity: 10 },
+        { materialNumber: 'MAT-002', quantity: 5 },
+      ],
+    });
+
+    expect(result.status).toBe('VALID');
+    expect(result.messages.map((m) => [m.severity, m.code])).toEqual([
+      ['INFO', 'EXPRESS_REQUESTED'],
+      ['INFO', 'SAME_MATERIAL_IN_SEVERAL_ITEMS'],
+    ]);
+    expect(result.totals?.netValue).toBe('2842.50');
+  });
+});
