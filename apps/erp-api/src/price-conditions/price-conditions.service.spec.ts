@@ -36,10 +36,79 @@ function unitRecord(unitId: string) {
   };
 }
 
+/** As configured by the migration, plus an inactive type for the tests */
+const CONDITION_TYPE_ROWS = [
+  {
+    code: 'ZP01',
+    name: 'List Price',
+    conditionClass: 'PRICE',
+    calculationType: 'QUANTITY',
+    isActive: true,
+  },
+  {
+    code: 'ZP02',
+    name: 'Customer Net Price',
+    conditionClass: 'PRICE',
+    calculationType: 'QUANTITY',
+    isActive: true,
+  },
+  {
+    code: 'ZP03',
+    name: 'Special Price',
+    conditionClass: 'PRICE',
+    calculationType: 'QUANTITY',
+    isActive: true,
+  },
+  {
+    code: 'ZD01',
+    name: 'Customer Discount',
+    conditionClass: 'DISCOUNT_SURCHARGE',
+    calculationType: 'PERCENTAGE',
+    isActive: true,
+  },
+  {
+    code: 'ZF01',
+    name: 'Freight',
+    conditionClass: 'FREIGHT',
+    calculationType: 'FIXED_AMOUNT',
+    isActive: true,
+  },
+  {
+    code: 'ZT01',
+    name: 'Output Tax',
+    conditionClass: 'TAX',
+    calculationType: 'PERCENTAGE',
+    isActive: true,
+  },
+  {
+    code: 'ZOLD',
+    name: 'Retired Price',
+    conditionClass: 'PRICE',
+    calculationType: 'QUANTITY',
+    isActive: false,
+  },
+];
+
+// Configuration as in the migration: ZP01 and the not yet calculable types
+// are not allowed for condition records
+const NOT_ALLOWED = ['ZP01', 'ZD01', 'ZF01', 'ZT01'];
+const CONDITION_TYPES = CONDITION_TYPE_ROWS.map((t) => ({
+  ...t,
+  allowedForConditionRecords: !NOT_ALLOWED.includes(t.code),
+}));
+
+const ZP02 = {
+  code: 'ZP02',
+  name: 'Customer Net Price',
+  conditionClass: 'PRICE',
+  calculationType: 'QUANTITY',
+};
+
 /** A stored condition row (without includes) */
 function row(changes: Record<string, unknown> = {}) {
   return {
     conditionId: 7,
+    conditionTypeCode: 'ZP02',
     materialNumber: 'MAT-001',
     scope: 'SOLD_TO',
     soldToCustomerNumber: 'CUST-1000',
@@ -58,6 +127,7 @@ function fullRecord(changes: Record<string, unknown> = {}) {
   const r = row(changes);
   return {
     ...r,
+    conditionType: CONDITION_TYPES.find((t) => t.code === r.conditionTypeCode),
     material: { materialNumber: r.materialNumber, description: 'Heat Pump' },
     soldTo: r.soldToCustomerNumber ? customer(r.soldToCustomerNumber) : null,
     unit: r.unitId ? unitRecord(r.unitId as string) : null,
@@ -66,6 +136,7 @@ function fullRecord(changes: Record<string, unknown> = {}) {
 
 // A plain object (not a class instance), so it can be copied with spread
 const soldToCreate = {
+  conditionTypeCode: 'ZP02',
   materialNumber: 'MAT-001',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'CUST-1000',
@@ -76,6 +147,7 @@ const soldToCreate = {
 } satisfies CreatePriceConditionDto;
 
 const unitCreate = {
+  conditionTypeCode: 'ZP02',
   materialNumber: 'MAT-001',
   scope: 'B2B_UNIT',
   unitId: 'UNIT-S',
@@ -101,6 +173,7 @@ describe('PriceConditionsService', () => {
     $queryRaw: jest.fn(),
     customer: { findUnique: jest.fn() },
     b2bUnit: { findUnique: jest.fn() },
+    conditionType: { findUnique: jest.fn() },
     priceCondition: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -123,6 +196,10 @@ describe('PriceConditionsService', () => {
     );
     db.b2bUnit.findUnique.mockImplementation(
       ({ where }: { where: { unitId: string } }) => unitRecord(where.unitId),
+    );
+    db.conditionType.findUnique.mockImplementation(
+      ({ where }: { where: { code: string } }) =>
+        CONDITION_TYPES.find((t) => t.code === where.code) ?? null,
     );
     db.priceCondition.findFirst.mockResolvedValue(null);
     db.priceCondition.create.mockResolvedValue(row());
@@ -158,6 +235,7 @@ describe('PriceConditionsService', () => {
       await expect(service.findAll()).resolves.toEqual([
         {
           conditionId: 7,
+          conditionType: ZP02,
           materialNumber: 'MAT-001',
           materialDescription: 'Heat Pump',
           scope: 'SOLD_TO',
@@ -221,6 +299,7 @@ describe('PriceConditionsService', () => {
       expect(db.$queryRaw).toHaveBeenCalledTimes(1);
       expect(db.priceCondition.create).toHaveBeenCalledWith({
         data: {
+          conditionTypeCode: 'ZP02',
           materialNumber: 'MAT-001',
           scope: 'SOLD_TO',
           soldToCustomerNumber: 'CUST-1000',
@@ -384,6 +463,129 @@ describe('PriceConditionsService', () => {
       db.priceCondition.create.mockRejectedValue(error);
 
       await expect(service.create(soldToCreate)).rejects.toBe(error);
+    });
+  });
+
+  describe('condition type', () => {
+    it.each(['ZP02', 'ZP03'])(
+      'should accept the price condition type %s for any scope',
+      async (conditionTypeCode) => {
+        await service.create({ ...soldToCreate, conditionTypeCode });
+        await service.create({ ...unitCreate, conditionTypeCode });
+
+        expect(db.priceCondition.create).toHaveBeenCalledTimes(2);
+        expect(db.priceCondition.create).toHaveBeenLastCalledWith({
+          data: expect.objectContaining({
+            conditionTypeCode,
+            scope: 'B2B_UNIT',
+          }) as unknown,
+        });
+      },
+    );
+
+    it.each([
+      [
+        'an unknown condition type',
+        'ZZ99',
+        ['conditionTypeCode ZZ99 does not exist'],
+      ],
+      [
+        'an inactive condition type',
+        'ZOLD',
+        ['conditionTypeCode ZOLD (Retired Price) is inactive'],
+      ],
+      [
+        'the list price ZP01, which comes from the material master',
+        'ZP01',
+        [
+          'conditionTypeCode ZP01 (List Price) is not allowed for condition records by its configuration',
+        ],
+      ],
+      [
+        'a discount condition type',
+        'ZD01',
+        [
+          'conditionTypeCode ZD01 (Customer Discount) cannot be used for price conditions yet: only condition types of class PRICE with calculation type QUANTITY are supported, not DISCOUNT_SURCHARGE with PERCENTAGE',
+        ],
+      ],
+      [
+        'a freight condition type',
+        'ZF01',
+        [
+          'conditionTypeCode ZF01 (Freight) cannot be used for price conditions yet: only condition types of class PRICE with calculation type QUANTITY are supported, not FREIGHT with FIXED_AMOUNT',
+        ],
+      ],
+      [
+        'a tax condition type',
+        'ZT01',
+        [
+          'conditionTypeCode ZT01 (Output Tax) cannot be used for price conditions yet: only condition types of class PRICE with calculation type QUANTITY are supported, not TAX with PERCENTAGE',
+        ],
+      ],
+    ])(
+      'should answer 422 for %s',
+      async (_case, conditionTypeCode, messages) => {
+        await expect422(
+          service.create({ ...soldToCreate, conditionTypeCode }),
+          messages,
+        );
+        expectNoWrites();
+      },
+    );
+
+    it('should report the condition type together with other problems', async () => {
+      const error = await service
+        .create({
+          ...soldToCreate,
+          conditionTypeCode: 'ZD01',
+          soldToCustomerNumber: 'OLD',
+        })
+        .catch((e: unknown) => e);
+      const messages = (
+        (error as UnprocessableEntityException).getResponse() as {
+          message: string[];
+        }
+      ).message;
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toMatch(/^conditionTypeCode ZD01/);
+      expect(messages[1]).toBe('soldToCustomerNumber OLD is inactive');
+    });
+
+    it('should map the condition type of a stored record', async () => {
+      db.priceCondition.findUnique.mockResolvedValue(
+        fullRecord({ conditionTypeCode: 'ZP03' }),
+      );
+
+      const condition = await service.findOne(7);
+
+      expect(condition.conditionType).toEqual({
+        code: 'ZP03',
+        name: 'Special Price',
+        conditionClass: 'PRICE',
+        calculationType: 'QUANTITY',
+      });
+    });
+
+    it('should check the condition type again on reactivation', async () => {
+      db.priceCondition.findUniqueOrThrow.mockResolvedValue(
+        row({ isActive: false, conditionTypeCode: 'ZOLD' }),
+      );
+
+      await expect422(service.update(7, { isActive: true }), [
+        'conditionTypeCode ZOLD (Retired Price) is inactive',
+      ]);
+      expectNoWrites();
+    });
+
+    it('should keep an active record editable when its condition type became inactive', async () => {
+      db.priceCondition.findUniqueOrThrow.mockResolvedValue(
+        row({ conditionTypeCode: 'ZOLD' }),
+      );
+
+      await service.update(7, { amount: '4100.00' });
+
+      expect(db.conditionType.findUnique).not.toHaveBeenCalled();
+      expect(db.priceCondition.update).toHaveBeenCalled();
     });
   });
 

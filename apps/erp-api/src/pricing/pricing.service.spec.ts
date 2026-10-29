@@ -28,8 +28,31 @@ function unit(changes: { isActive?: boolean; soldToActive?: boolean } = {}) {
   };
 }
 
+/** Condition types as configured by the migration */
+const ZP01 = {
+  code: 'ZP01',
+  name: 'List Price',
+  conditionClass: 'PRICE',
+  calculationType: 'QUANTITY',
+};
+const ZP02 = {
+  code: 'ZP02',
+  name: 'Customer Net Price',
+  conditionClass: 'PRICE',
+  calculationType: 'QUANTITY',
+};
+const ZP03 = {
+  code: 'ZP03',
+  name: 'Special Price',
+  conditionClass: 'PRICE',
+  calculationType: 'QUANTITY',
+};
+const listPriceRow = { ...ZP01, isActive: true, sortOrder: 10 };
+
 const unitCondition = {
   conditionId: 12,
+  conditionTypeCode: 'ZP03',
+  conditionType: { ...ZP03, isActive: true, sortOrder: 30 },
   scope: 'B2B_UNIT',
   amount: new Prisma.Decimal('4200'),
   currency: 'EUR',
@@ -40,6 +63,8 @@ const unitCondition = {
 
 const soldToCondition = {
   conditionId: 7,
+  conditionTypeCode: 'ZP02',
+  conditionType: { ...ZP02, isActive: true, sortOrder: 20 },
   scope: 'SOLD_TO',
   amount: new Prisma.Decimal('4350.5'),
   currency: 'EUR',
@@ -61,10 +86,12 @@ describe('PricingService', () => {
     material: { findUnique: jest.fn() },
     b2bUnit: { findUnique: jest.fn() },
     priceCondition: { findMany: jest.fn() },
+    conditionType: { findUnique: jest.fn() },
   };
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    db.conditionType.findUnique.mockResolvedValue(listPriceRow);
     db.material.findUnique.mockResolvedValue(material);
     db.b2bUnit.findUnique.mockResolvedValue(unit());
     db.priceCondition.findMany.mockResolvedValue([]);
@@ -103,6 +130,7 @@ describe('PricingService', () => {
       netValue: '8400.00',
       currency: 'EUR',
       source: 'B2B_UNIT',
+      conditionType: ZP03,
       conditionId: 12,
       validFrom: '2026-11-01',
       validTo: null,
@@ -112,18 +140,21 @@ describe('PricingService', () => {
           conditionId: 12,
           amount: '4200.00',
           applied: true,
+          conditionType: ZP03,
         },
         {
           source: 'SOLD_TO',
           conditionId: 7,
           amount: '4350.50',
           applied: false,
+          conditionType: ZP02,
         },
         {
           source: 'BASE_PRICE',
           conditionId: null,
           amount: '4500.00',
           applied: false,
+          conditionType: ZP01,
         },
       ],
     });
@@ -141,6 +172,7 @@ describe('PricingService', () => {
           { scope: 'SOLD_TO', soldToCustomerNumber: 'CUST-1000' },
         ],
       },
+      include: { conditionType: true },
     });
   });
 
@@ -170,6 +202,26 @@ describe('PricingService', () => {
       conditionId: null,
       validFrom: null,
       validTo: null,
+    });
+  });
+
+  it('should show ZP01 for the base price', async () => {
+    const result = await service.calculate(request);
+
+    expect(db.conditionType.findUnique).toHaveBeenCalledWith({
+      where: { code: 'ZP01' },
+    });
+    expect(result.conditionType).toEqual(ZP01);
+    expect(result.steps.at(-1)?.conditionType).toEqual(ZP01);
+  });
+
+  it('should still use the base price if ZP01 is not configured', async () => {
+    db.conditionType.findUnique.mockResolvedValue(null);
+
+    await expect(service.calculate(request)).resolves.toMatchObject({
+      unitPrice: '4500.00',
+      source: 'BASE_PRICE',
+      conditionType: null,
     });
   });
 
@@ -207,6 +259,7 @@ describe('PricingService.priceItems', () => {
   const batchDb = {
     material: { findMany: jest.fn() },
     priceCondition: { findMany: jest.fn() },
+    conditionType: { findUnique: jest.fn() },
   };
   const service = new PricingService(batchDb as never);
   const stuttgart = { unitId: 'UNIT-S', soldToCustomerNumber: 'CUST-1000' };
@@ -218,6 +271,7 @@ describe('PricingService.priceItems', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    batchDb.conditionType.findUnique.mockResolvedValue(listPriceRow);
     batchDb.material.findMany.mockResolvedValue([material, thermostat]);
     batchDb.priceCondition.findMany.mockResolvedValue([
       { ...unitCondition, materialNumber: 'MAT-001' },
@@ -249,6 +303,7 @@ describe('PricingService.priceItems', () => {
           { scope: 'SOLD_TO', soldToCustomerNumber: 'CUST-1000' },
         ],
       },
+      include: { conditionType: true },
     });
   });
 
@@ -296,6 +351,7 @@ describe('PricingService.priceItems', () => {
     const tx = {
       material: { findMany: jest.fn().mockResolvedValue([]) },
       priceCondition: { findMany: jest.fn().mockResolvedValue([]) },
+      conditionType: { findUnique: jest.fn().mockResolvedValue(listPriceRow) },
     };
 
     await service.priceItems(

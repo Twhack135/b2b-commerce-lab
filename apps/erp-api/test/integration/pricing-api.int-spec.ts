@@ -10,6 +10,19 @@ type Result = {
   steps: { source: string; conditionId: number | null; applied: boolean }[];
 };
 
+const ZP01 = {
+  code: 'ZP01',
+  name: 'List Price',
+  conditionClass: 'PRICE',
+  calculationType: 'QUANTITY',
+};
+const ZP02 = {
+  code: 'ZP02',
+  name: 'Customer Net Price',
+  conditionClass: 'PRICE',
+  calculationType: 'QUANTITY',
+};
+
 describe('Pricing API', () => {
   let app: INestApplication;
   let prisma: PrismaService;
@@ -30,7 +43,12 @@ describe('Pricing API', () => {
   const createCondition = async (body: object) => {
     const response = await http()
       .post('/price-conditions')
-      .send({ materialNumber: 'MAT-1', currency: 'EUR', ...body })
+      .send({
+        conditionTypeCode: 'ZP02',
+        materialNumber: 'MAT-1',
+        currency: 'EUR',
+        ...body,
+      })
       .expect(201);
     return (response.body as { conditionId: number }).conditionId;
   };
@@ -106,6 +124,7 @@ describe('Pricing API', () => {
       netValue: '12600.00',
       currency: 'EUR',
       source: 'B2B_UNIT',
+      conditionType: ZP02,
       conditionId: unitId,
       validFrom: '2026-07-01',
       validTo: null,
@@ -115,18 +134,21 @@ describe('Pricing API', () => {
           conditionId: unitId,
           amount: '4200.00',
           applied: true,
+          conditionType: ZP02,
         },
         {
           source: 'SOLD_TO',
           conditionId: soldToId,
           amount: '4350.00',
           applied: false,
+          conditionType: ZP02,
         },
         {
           source: 'BASE_PRICE',
           conditionId: null,
           amount: '4500.00',
           applied: false,
+          conditionType: ZP01,
         },
       ],
     });

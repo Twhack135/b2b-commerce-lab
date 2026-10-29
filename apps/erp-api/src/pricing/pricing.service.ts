@@ -1,7 +1,17 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { fromDbDate } from '../common/dates';
 import { formatAmount } from '../common/money';
-import { Material, PriceCondition, Prisma } from '../generated/prisma/client';
+import {
+  LIST_PRICE_CONDITION_TYPE,
+  toConditionTypeSummary,
+} from '../condition-types/condition-type-rules';
+import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
+import {
+  ConditionType,
+  Material,
+  PriceCondition,
+  Prisma,
+} from '../generated/prisma/client';
 import { PriceConditionScope } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalculatePriceDto } from './dto/calculate-price.dto';
@@ -61,7 +71,9 @@ export class PricingService {
           },
         ],
       },
+      include: { conditionType: true },
     });
+    const listPriceType = await loadListPriceType(this.prisma);
 
     const quantity = dto.quantity ?? 1;
     const result = determinePrice({
@@ -70,6 +82,7 @@ export class PricingService {
       basePrice: material.price,
       currency: material.currency,
       candidates: conditions.map(toCandidate),
+      baseConditionType: listPriceType,
     });
 
     return {
@@ -83,6 +96,7 @@ export class PricingService {
       netValue: formatAmount(result.netValue),
       currency: result.currency,
       source: result.source,
+      conditionType: result.conditionType,
       conditionId: result.condition?.conditionId ?? null,
       validFrom: result.condition?.validFrom ?? null,
       validTo: result.condition?.validTo ?? null,
@@ -91,9 +105,10 @@ export class PricingService {
   }
 
   /**
-   * Prices several positions with three queries in total, however many
-   * positions there are: the materials, and the active conditions of these
-   * materials for the unit and its Sold-to. Every position is then priced on
+   * Prices several positions with four queries in total, however many
+   * positions there are: the materials, the active conditions of these
+   * materials for the unit and its Sold-to (with their condition types) and
+   * the list price condition type. Every position is then priced on
    * its own by determinePrice, also if a material occurs more than once.
    *
    * Unlike calculate(), this does not check whether the unit or its
@@ -130,8 +145,10 @@ export class PricingService {
               },
             ],
           },
+          include: { conditionType: true },
         })
       : [];
+    const listPriceType = unit ? await loadListPriceType(db) : null;
 
     return request.items.map((item) => {
       const material =
@@ -147,6 +164,7 @@ export class PricingService {
           candidates: conditions
             .filter((c) => c.materialNumber === material.materialNumber)
             .map(toCandidate),
+          baseConditionType: listPriceType,
         }),
       };
     });
@@ -163,7 +181,21 @@ export interface ItemPricing {
   determination: Determination | null;
 }
 
-function toCandidate(condition: PriceCondition): ConditionCandidate {
+/**
+ * The condition type shown for the material base price (ZP01, transitional).
+ * The price itself never depends on it: without the type, the base price
+ * is still used, only without condition type metadata.
+ */
+async function loadListPriceType(db: Db): Promise<ConditionTypeSummary | null> {
+  const type = await db.conditionType.findUnique({
+    where: { code: LIST_PRICE_CONDITION_TYPE },
+  });
+  return type && toConditionTypeSummary(type);
+}
+
+function toCandidate(
+  condition: PriceCondition & { conditionType: ConditionType },
+): ConditionCandidate {
   return {
     conditionId: condition.conditionId,
     scope: condition.scope,
@@ -172,6 +204,7 @@ function toCandidate(condition: PriceCondition): ConditionCandidate {
     validFrom: fromDbDate(condition.validFrom),
     validTo: condition.validTo && fromDbDate(condition.validTo),
     isActive: condition.isActive,
+    conditionType: toConditionTypeSummary(condition.conditionType),
   };
 }
 
@@ -182,5 +215,6 @@ export function toResultSteps(steps: PricingStep[]): PriceResultStep[] {
     conditionId: step.conditionId,
     amount: step.amount && formatAmount(step.amount),
     applied: step.applied,
+    conditionType: step.conditionType,
   }));
 }

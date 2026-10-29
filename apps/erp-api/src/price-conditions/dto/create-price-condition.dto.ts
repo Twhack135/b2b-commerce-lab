@@ -1,4 +1,10 @@
-import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 import { UNIT_ID_MAX_LENGTH } from '../../b2b-units/dto/b2b-unit-validators';
 import {
   IfPresent,
@@ -11,7 +17,16 @@ import { IsCurrencyCode } from '../../materials/dto/material-validators';
 import { IsAmount, IsScopeKey } from './price-condition-validators';
 
 export class CreatePriceConditionDto {
-  // Material, scope and key (Sold-to or unit) are fixed after creation
+  // Condition type, material, scope and key (Sold-to or unit) are fixed after
+  // creation. Required: every condition record has a condition type, e.g.
+  // ZP02. Which types can be used is checked against the configuration.
+  @IsString()
+  @Matches(/^[A-Z0-9]{4}$/, {
+    message:
+      'conditionTypeCode must be a condition type code of 4 uppercase letters or digits (e.g. ZP02)',
+  })
+  conditionTypeCode: string;
+
   @IsString()
   @IsBusinessKey()
   materialNumber: string;

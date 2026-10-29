@@ -1,3 +1,4 @@
+import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
 import { PricingSource } from './price-determination';
 
 export interface PriceResultStep {
@@ -5,6 +6,8 @@ export interface PriceResultStep {
   conditionId: number | null;
   amount: string | null;
   applied: boolean;
+  /** Added in Sprint 9A: e.g. ZP02, or ZP01 for the base price */
+  conditionType: ConditionTypeSummary | null;
 }
 
 /**
@@ -24,6 +27,8 @@ export interface PriceResult {
   netValue: string;
   currency: string;
   source: PricingSource;
+  /** Added in Sprint 9A: condition type of the used price (ZP01 for the base price) */
+  conditionType: ConditionTypeSummary | null;
   /** The winning condition and its validity; null for the base price */
   conditionId: number | null;
   validFrom: string | null;

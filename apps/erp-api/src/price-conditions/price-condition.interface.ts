@@ -1,4 +1,5 @@
 import { PartnerSummary } from '../common/partner-summary';
+import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
 import { PriceConditionScope } from '../generated/prisma/enums';
 
 /** Short view of a B2B unit with its Sold-to */
@@ -17,6 +18,8 @@ export interface UnitSummary {
  */
 export interface PriceCondition {
   conditionId: number;
+  /** Added in Sprint 9A; all other fields are unchanged */
+  conditionType: ConditionTypeSummary;
   materialNumber: string;
   materialDescription: string;
   scope: PriceConditionScope;

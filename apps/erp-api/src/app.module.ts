@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { B2bUnitsModule } from './b2b-units/b2b-units.module';
+import { ConditionTypesModule } from './condition-types/condition-types.module';
 import { CustomerAccountsModule } from './customer-accounts/customer-accounts.module';
 import { CustomersModule } from './customers/customers.module';
 import { MaterialsModule } from './materials/materials.module';
@@ -15,6 +16,7 @@ import { SalesOrdersModule } from './sales-orders/sales-orders.module';
     CustomersModule,
     CustomerAccountsModule,
     B2bUnitsModule,
+    ConditionTypesModule,
     PriceConditionsModule,
     PricingModule,
     SalesOrdersModule,

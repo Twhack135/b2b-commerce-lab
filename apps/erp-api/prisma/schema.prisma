@@ -127,8 +127,59 @@ enum PriceConditionScope {
   @@map("price_condition_scope")
 }
 
+// Kind of a condition type (comparable to the SAP condition class): what a
+// condition of this type contributes to a price calculation.
+enum ConditionClass {
+  PRICE
+  DISCOUNT_SURCHARGE
+  FREIGHT
+  TAX
+
+  @@map("condition_class")
+}
+
+// How the value of a condition is applied (comparable to the SAP calculation
+// type): QUANTITY = amount per unit (e.g. per piece), FIXED_AMOUNT = an
+// amount independent of the quantity (e.g. a freight flat rate),
+// PERCENTAGE = a percentage of a base value (e.g. a discount or tax).
+enum CalculationType {
+  QUANTITY
+  FIXED_AMOUNT
+  PERCENTAGE
+
+  @@map("calculation_type")
+}
+
+// Configuration of a condition type (comparable to SAP KSCHL), e.g. ZP02
+// Customer Net Price. Condition records refer to a type; the type itself is
+// not tied to a scope such as Sold-to or B2B unit. Read-only for now, but
+// code, name, activation and configuration are data, so they can be
+// administered later. Which combinations of class and calculation type the
+// pricing engine can calculate is decided in the code (currently only
+// PRICE with QUANTITY). Whether a type may be used for condition records is
+// configuration (allowedForConditionRecords), e.g. ZP01 is the material base
+// price for now and cannot be maintained as a condition record.
+model ConditionType {
+  code            String          @id @db.VarChar(4)
+  name            String          @db.VarChar(60)
+  conditionClass  ConditionClass  @map("condition_class")
+  calculationType CalculationType @map("calculation_type")
+  isActive        Boolean         @default(true) @map("is_active")
+  // May new condition records (price conditions) use this type? Can change
+  // later, e.g. when list prices become condition records of their own
+  allowedForConditionRecords Boolean @default(false) @map("allowed_for_condition_records")
+  // Display order, e.g. in lists and a future pricing procedure overview
+  sortOrder       Int             @map("sort_order")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  priceConditions PriceCondition[]
+
+  @@map("condition_types")
+}
+
 // A customer-specific material price for a period (comparable to an SAP
-// condition record). Exactly one of soldToCustomerNumber and unitId is set,
+// condition record) of a condition type, e.g. ZP02. Exactly one of soldToCustomerNumber and unitId is set,
 // depending on the scope. Database rules written by hand in the migration,
 // because Prisma cannot model them:
 // - CHECK: the key column matching the scope is set, the other one is null
@@ -148,15 +199,22 @@ model PriceCondition {
   validFrom            DateTime            @map("valid_from") @db.Date
   validTo              DateTime?           @map("valid_to") @db.Date
   isActive             Boolean             @default(true) @map("is_active")
+  conditionTypeCode    String              @map("condition_type_code") @db.VarChar(4)
   createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   material Material  @relation(fields: [materialNumber], references: [materialNumber], onDelete: Restrict, onUpdate: Restrict)
   soldTo   Customer? @relation(fields: [soldToCustomerNumber], references: [customerNumber], onDelete: Restrict, onUpdate: Restrict)
   unit     B2bUnit?  @relation(fields: [unitId], references: [unitId], onDelete: Restrict, onUpdate: Restrict)
+  // The overlap rule above deliberately ignores the condition type: there is
+  // at most one active price per key and day. Future pricing procedures must
+  // combine several condition types at once (list price, discounts, freight,
+  // tax), which will need their own rules per type.
+  conditionType ConditionType @relation(fields: [conditionTypeCode], references: [code], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([materialNumber])
   @@index([soldToCustomerNumber])
   @@index([unitId])
+  @@index([conditionTypeCode])
   @@map("price_conditions")
 }

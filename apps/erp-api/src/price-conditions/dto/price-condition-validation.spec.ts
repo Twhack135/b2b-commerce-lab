@@ -33,6 +33,7 @@ async function messagesOf(body: unknown, dto: Dto): Promise<string[]> {
 }
 
 const soldToBody = {
+  conditionTypeCode: 'ZP02',
   materialNumber: 'MAT-001',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'CUST-1000',
@@ -43,6 +44,7 @@ const soldToBody = {
 };
 
 const unitBody = {
+  conditionTypeCode: 'ZP02',
   materialNumber: 'MAT-001',
   scope: 'B2B_UNIT',
   unitId: 'UNIT-STUTTGART',
@@ -75,6 +77,26 @@ describe('CreatePriceConditionDto validation', () => {
   });
 
   it.each([
+    [
+      'a missing condition type',
+      { conditionTypeCode: undefined },
+      'conditionTypeCode must be a condition type code',
+    ],
+    [
+      'a lowercase condition type',
+      { conditionTypeCode: 'zp02' },
+      'conditionTypeCode must be a condition type code',
+    ],
+    [
+      'a condition type with 5 characters',
+      { conditionTypeCode: 'ZP021' },
+      'conditionTypeCode must be a condition type code',
+    ],
+    [
+      'a condition type as number',
+      { conditionTypeCode: 2 },
+      'conditionTypeCode must be a string',
+    ],
     ['a missing scope', { scope: undefined }, 'scope must be one of'],
     ['an unknown scope', { scope: 'CUSTOMER' }, 'scope must be one of'],
     [
@@ -171,6 +193,7 @@ describe('UpdatePriceConditionDto validation', () => {
     ['changing the Sold-to', { soldToCustomerNumber: 'CUST-1100' }],
     ['changing the unit', { unitId: 'UNIT-MUENCHEN' }],
     ['changing the currency', { currency: 'USD' }],
+    ['changing the condition type', { conditionTypeCode: 'ZP03' }],
     ['a null amount', { amount: null }],
     ['a null validFrom', { validFrom: null }],
     ['an invalid validTo', { validTo: '31.12.2026' }],

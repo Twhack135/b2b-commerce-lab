@@ -2,7 +2,15 @@ import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { createPricingData, createTestApp, resetDatabase } from './helpers';
 
+const ZP02 = {
+  code: 'ZP02',
+  name: 'Customer Net Price',
+  conditionClass: 'PRICE',
+  calculationType: 'QUANTITY',
+};
+
 const soldToBody = {
+  conditionTypeCode: 'ZP02',
   materialNumber: 'MAT-1',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'ACC',
@@ -13,6 +21,7 @@ const soldToBody = {
 };
 
 const unitBody = {
+  conditionTypeCode: 'ZP02',
   materialNumber: 'MAT-1',
   scope: 'B2B_UNIT',
   unitId: 'U1',
@@ -47,6 +56,7 @@ describe('Price conditions API', () => {
 
       expect(response.body).toEqual({
         conditionId: expect.any(Number) as unknown,
+        conditionType: ZP02,
         materialNumber: 'MAT-1',
         materialDescription: 'Heat Pump',
         scope: 'SOLD_TO',

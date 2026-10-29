@@ -167,6 +167,7 @@ export function buildItems(
       currency: determination?.currency ?? null,
       pricing: determination && {
         source: determination.source,
+        conditionType: determination.conditionType,
         conditionId: determination.condition?.conditionId ?? null,
         validFrom: determination.condition?.validFrom ?? null,
         validTo: determination.condition?.validTo ?? null,

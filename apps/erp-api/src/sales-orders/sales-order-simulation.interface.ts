@@ -1,4 +1,5 @@
 import { PartnerSummary } from '../common/partner-summary';
+import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
 import { PricingSource } from '../pricing/price-determination';
 import { PriceResultStep } from '../pricing/price-result.interface';
 import { RequestedShippingMethod } from './dto/simulate-sales-order.dto';
@@ -54,6 +55,8 @@ export interface SimulatedItem {
   currency: string | null;
   pricing: {
     source: PricingSource;
+    /** Added in Sprint 9A: condition type of the used price (ZP01 for the base price) */
+    conditionType: ConditionTypeSummary | null;
     conditionId: number | null;
     validFrom: string | null;
     validTo: string | null;

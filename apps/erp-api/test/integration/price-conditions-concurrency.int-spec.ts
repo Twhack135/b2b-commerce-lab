@@ -10,6 +10,7 @@ const ROUNDS = 10;
 const PARALLEL = 5;
 
 const soldToBody = {
+  conditionTypeCode: 'ZP02',
   materialNumber: 'MAT-1',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'ACC',

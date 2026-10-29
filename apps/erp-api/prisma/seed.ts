@@ -97,6 +97,7 @@ const b2bUnits = [
 // Example prices; open-ended unless validTo is set. Dates are YYYY-MM-DD.
 const priceConditions = [
   {
+    conditionTypeCode: 'ZP02',
     materialNumber: 'MAT-001',
     scope: 'SOLD_TO',
     soldToCustomerNumber: 'CUST-0001',
@@ -107,6 +108,7 @@ const priceConditions = [
     validTo: null,
   },
   {
+    conditionTypeCode: 'ZP02',
     materialNumber: 'MAT-001',
     scope: 'B2B_UNIT',
     soldToCustomerNumber: null,
@@ -117,6 +119,7 @@ const priceConditions = [
     validTo: '2026-12-31',
   },
   {
+    conditionTypeCode: 'ZP02',
     materialNumber: 'MAT-002',
     scope: 'SOLD_TO',
     soldToCustomerNumber: 'CUST-0001',

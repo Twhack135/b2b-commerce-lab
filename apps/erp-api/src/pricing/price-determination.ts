@@ -1,8 +1,13 @@
 import { Decimal, roundAmount } from '../common/money';
+import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
 import { PriceConditionScope } from '../generated/prisma/enums';
 
 // Price determination without database access, so every rule can be tested
-// directly. Comparable to an SAP access sequence with a single condition type.
+// directly. Comparable to an SAP access sequence for prices: the levels below
+// decide which price is used; the condition type of a record (e.g. ZP02) is
+// carried along as metadata and does not change the precedence. A future
+// pricing procedure will combine several condition types (list price,
+// discounts, freight, tax) in one calculation.
 
 export type PricingSource = PriceConditionScope | 'BASE_PRICE';
 
@@ -23,6 +28,8 @@ export interface ConditionCandidate {
   /** YYYY-MM-DD, inclusive; null means open-ended */
   validTo: string | null;
   isActive: boolean;
+  /** Metadata only; the condition type does not change the precedence */
+  conditionType?: ConditionTypeSummary;
 }
 
 export interface DeterminationInput {
@@ -34,6 +41,8 @@ export interface DeterminationInput {
   /** Material.currency; all conditions must use it */
   currency: string;
   candidates: ConditionCandidate[];
+  /** Condition type shown for the base price (ZP01, transitional) */
+  baseConditionType?: ConditionTypeSummary | null;
 }
 
 /** One checked level, as in the SAP pricing analysis */
@@ -44,6 +53,8 @@ export interface PricingStep {
   amount: Decimal | null;
   /** True for the level whose price is used */
   applied: boolean;
+  /** Condition type of the valid condition (ZP01 for the base price) */
+  conditionType: ConditionTypeSummary | null;
 }
 
 export interface Determination {
@@ -53,6 +64,8 @@ export interface Determination {
   unitPrice: Decimal;
   netValue: Decimal;
   currency: string;
+  /** Condition type of the used price (ZP01 for the base price) */
+  conditionType: ConditionTypeSummary | null;
   steps: PricingStep[];
 }
 
@@ -96,6 +109,7 @@ export function determinePrice(input: DeterminationInput): Determination {
       conditionId: match?.conditionId ?? null,
       amount: match?.amount ?? null,
       applied: match !== null && winner === null,
+      conditionType: match?.conditionType ?? null,
     });
     winner ??= match;
   }
@@ -105,6 +119,7 @@ export function determinePrice(input: DeterminationInput): Determination {
     conditionId: null,
     amount: input.basePrice,
     applied: winner === null,
+    conditionType: input.baseConditionType ?? null,
   });
 
   const unitPrice = winner?.amount ?? input.basePrice;
@@ -115,6 +130,9 @@ export function determinePrice(input: DeterminationInput): Determination {
     // Exact for whole quantities; rounded by the one central rule anyway
     netValue: roundAmount(unitPrice.mul(input.quantity)),
     currency: input.currency,
+    conditionType: winner
+      ? (winner.conditionType ?? null)
+      : (input.baseConditionType ?? null),
     steps,
   };
 }

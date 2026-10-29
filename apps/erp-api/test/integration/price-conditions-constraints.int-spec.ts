@@ -48,9 +48,9 @@ describe('price_conditions database rules', () => {
       ...row,
     };
     return prisma.$executeRaw`
-      INSERT INTO price_conditions (material_number, scope, sold_to_customer_number,
+      INSERT INTO price_conditions (condition_type_code, material_number, scope, sold_to_customer_number,
         unit_id, amount, currency, valid_from, valid_to, is_active, updated_at)
-      VALUES (${r.material}, ${r.scope}::price_condition_scope, ${r.soldTo},
+      VALUES ('ZP02', ${r.material}, ${r.scope}::price_condition_scope, ${r.soldTo},
         ${r.unit}, ${r.amount}::numeric, ${r.currency}, ${r.from}::date,
         ${r.to}::date, ${r.active}, now())`;
   };

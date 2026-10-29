@@ -79,6 +79,7 @@ function determination(
     unitPrice: d(unitPrice),
     netValue: d(unitPrice).mul(quantity),
     currency,
+    conditionType: null,
     steps: [],
   };
 }

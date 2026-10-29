@@ -239,3 +239,72 @@ describe('determinePrice', () => {
     });
   });
 });
+
+describe('condition type metadata', () => {
+  const zp01 = {
+    code: 'ZP01',
+    name: 'List Price',
+    conditionClass: 'PRICE',
+    calculationType: 'QUANTITY',
+  } as const;
+  const zp02 = {
+    code: 'ZP02',
+    name: 'Customer Net Price',
+    conditionClass: 'PRICE',
+    calculationType: 'QUANTITY',
+  } as const;
+  const zp03 = {
+    code: 'ZP03',
+    name: 'Special Price',
+    conditionClass: 'PRICE',
+    calculationType: 'QUANTITY',
+  } as const;
+
+  it('carries the condition type of every level and of the used price', () => {
+    const result = determinePrice(
+      input({
+        baseConditionType: zp01,
+        candidates: [
+          { ...SOLD_TO_PRICE, conditionType: zp03 },
+          { ...UNIT_PRICE, conditionType: zp02 },
+        ],
+      }),
+    );
+    expect(result.conditionType).toEqual(zp02);
+    expect(result.steps.map((s) => s.conditionType?.code ?? null)).toEqual([
+      'ZP02',
+      'ZP03',
+      'ZP01',
+    ]);
+  });
+
+  it('shows ZP01 for the base price and null for empty levels', () => {
+    const result = determinePrice(input({ baseConditionType: zp01 }));
+    expect(result.conditionType).toEqual(zp01);
+    expect(result.steps.map((s) => s.conditionType?.code ?? null)).toEqual([
+      null,
+      null,
+      'ZP01',
+    ]);
+  });
+
+  it('never lets the condition type change the precedence', () => {
+    // A "special price" on the Sold-to level does not beat the unit level
+    const result = determinePrice(
+      input({
+        candidates: [
+          { ...SOLD_TO_PRICE, amount: d('50.00'), conditionType: zp03 },
+          { ...UNIT_PRICE, conditionType: zp02 },
+        ],
+      }),
+    );
+    expect(result.source).toBe('B2B_UNIT');
+    expect(result.unitPrice.toFixed(2)).toBe('80.00');
+  });
+
+  it('still prices without any condition type metadata', () => {
+    const result = determinePrice(input({ candidates: [SOLD_TO_PRICE] }));
+    expect(result.unitPrice.toFixed(2)).toBe('90.00');
+    expect(result.conditionType).toBeNull();
+  });
+});

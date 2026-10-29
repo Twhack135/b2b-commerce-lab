@@ -195,6 +195,7 @@ export async function createMuellerData(prisma: PrismaService) {
   await prisma.priceCondition.createMany({
     data: [
       {
+        conditionTypeCode: 'ZP02',
         materialNumber: 'MAT-002',
         scope: 'SOLD_TO',
         soldToCustomerNumber: 'CUST-1000',
@@ -203,6 +204,7 @@ export async function createMuellerData(prisma: PrismaService) {
         validFrom: new Date('2026-01-01T00:00:00Z'),
       },
       {
+        conditionTypeCode: 'ZP02',
         materialNumber: 'MAT-002',
         scope: 'B2B_UNIT',
         unitId: 'UNIT-MUENCHEN',

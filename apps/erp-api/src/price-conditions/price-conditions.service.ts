@@ -7,6 +7,10 @@ import {
 import { fromDbDate, toDbDate } from '../common/dates';
 import { formatAmount } from '../common/money';
 import { toPartnerSummary } from '../common/partner-summary';
+import {
+  conditionTypeViolations,
+  toConditionTypeSummary,
+} from '../condition-types/condition-type-rules';
 import { Prisma } from '../generated/prisma/client';
 import { PriceConditionScope } from '../generated/prisma/enums';
 import { EXCLUSION_VIOLATION, isPostgresError } from '../prisma/prisma-errors';
@@ -16,6 +20,7 @@ import { UpdatePriceConditionDto } from './dto/update-price-condition.dto';
 import { PriceCondition } from './price-condition.interface';
 
 const CONDITION_INCLUDE = {
+  conditionType: true,
   material: true,
   soldTo: true,
   unit: { include: { soldTo: { include: { customer: true } } } },
@@ -92,9 +97,12 @@ export class PriceConditionsService {
         };
         const isActive = dto.isActive ?? true;
 
-        const violations = material
-          ? checkCurrency(dto.materialNumber, material.currency, dto.currency)
-          : [`materialNumber ${dto.materialNumber} does not exist`];
+        const violations = await checkConditionType(tx, dto.conditionTypeCode);
+        violations.push(
+          ...(material
+            ? checkCurrency(dto.materialNumber, material.currency, dto.currency)
+            : [`materialNumber ${dto.materialNumber} does not exist`]),
+        );
         violations.push(...(await checkKey(tx, key)));
         violations.push(...checkPeriod(period));
         if (violations.length > 0) {
@@ -107,6 +115,7 @@ export class PriceConditionsService {
 
         const created = await tx.priceCondition.create({
           data: {
+            conditionTypeCode: dto.conditionTypeCode,
             materialNumber: dto.materialNumber,
             ...key,
             amount: dto.amount,
@@ -168,8 +177,12 @@ export class PriceConditionsService {
 
         const violations = checkPeriod(period);
         // A reactivated condition must be valid like a new one. An active
-        // condition stays valid when its Sold-to or unit becomes inactive.
+        // condition stays valid when its Sold-to, unit or condition type
+        // becomes inactive.
         if (isActive && !current.isActive) {
+          violations.push(
+            ...(await checkConditionType(tx, current.conditionTypeCode)),
+          );
           violations.push(...(await checkKey(tx, key)));
           violations.push(
             ...checkCurrency(
@@ -225,6 +238,12 @@ async function lockMaterial(db: Db, materialNumber: string) {
     SELECT currency FROM materials
     WHERE material_number = ${materialNumber} FOR UPDATE`;
   return rows[0];
+}
+
+/** The condition type must exist, be active and be supported for prices */
+async function checkConditionType(db: Db, code: string): Promise<string[]> {
+  const type = await db.conditionType.findUnique({ where: { code } });
+  return conditionTypeViolations(code, type);
 }
 
 function checkCurrency(
@@ -334,6 +353,7 @@ function isConditionId(value: number) {
 function toPriceCondition(condition: ConditionRecord): PriceCondition {
   return {
     conditionId: condition.conditionId,
+    conditionType: toConditionTypeSummary(condition.conditionType),
     materialNumber: condition.materialNumber,
     materialDescription: condition.material.description,
     scope: condition.scope,
