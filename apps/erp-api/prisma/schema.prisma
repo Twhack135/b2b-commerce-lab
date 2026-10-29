@@ -4,6 +4,8 @@ generator client {
   moduleFormat        = "cjs"
   // Extensionless imports work with ts-node, Jest and the Nest build
   importFileExtension = ""
+  // Partial unique index: at most one default ship-to per B2B unit
+  previewFeatures     = ["partialIndexes"]
 }
 
 datasource db {
@@ -33,5 +35,80 @@ model Customer {
   country        String  @db.Char(2)
   isActive       Boolean @default(true) @map("is_active")
 
+  // Relation only; the customers table itself has no new columns
+  accountMembership CustomerAccountMember?
+
   @@map("customers")
+}
+
+// Customer account membership. A customer account is represented by its
+// owner, an existing customer. The owner has a row pointing to itself
+// (customer = account); members point to the owner. Database rules:
+// - primary key: a customer belongs to at most one account, so an owner
+//   cannot be a member of another account
+// - owner foreign key: an account must be an owner row, so members cannot
+//   own accounts (no nesting, no cycles)
+// accountOwnerRef is a copy of accountCustomerNumber, because Prisma cannot
+// use the same column twice in one foreign key. A CHECK constraint in the
+// migration keeps both equal.
+model CustomerAccountMember {
+  customerNumber        String @id @map("customer_number") @db.VarChar(20)
+  accountCustomerNumber String @map("account_customer_number") @db.VarChar(20)
+  accountOwnerRef       String @map("account_owner_ref") @db.VarChar(20)
+
+  customer Customer              @relation(fields: [customerNumber], references: [customerNumber], onDelete: Restrict, onUpdate: Restrict)
+  owner    CustomerAccountMember @relation("AccountOwner", fields: [accountCustomerNumber, accountOwnerRef], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+
+  ownedMembers      CustomerAccountMember[] @relation("AccountOwner")
+  soldToUnits       B2bUnit[]               @relation("UnitSoldTo")
+  billToUnits       B2bUnit[]               @relation("UnitBillTo")
+  payerUnits        B2bUnit[]               @relation("UnitPayer")
+  shipToAssignments B2bUnitShipTo[]
+
+  @@unique([customerNumber, accountCustomerNumber])
+  @@index([accountCustomerNumber])
+  @@map("customer_account_members")
+}
+
+// A selectable ordering context of a customer account (future webshop).
+// Partner foreign keys point to (customer, account) pairs in
+// customer_account_members, so every partner belongs to the unit's account.
+model B2bUnit {
+  unitId                String  @id @map("unit_id") @db.VarChar(20)
+  name                  String  @db.VarChar(100)
+  accountCustomerNumber String  @map("account_customer_number") @db.VarChar(20)
+  soldToCustomerNumber  String  @map("sold_to_customer_number") @db.VarChar(20)
+  billToCustomerNumber  String  @map("bill_to_customer_number") @db.VarChar(20)
+  payerCustomerNumber   String  @map("payer_customer_number") @db.VarChar(20)
+  isActive              Boolean @default(true) @map("is_active")
+
+  soldTo CustomerAccountMember @relation("UnitSoldTo", fields: [soldToCustomerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+  billTo CustomerAccountMember @relation("UnitBillTo", fields: [billToCustomerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+  payer  CustomerAccountMember @relation("UnitPayer", fields: [payerCustomerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+
+  shipTos B2bUnitShipTo[]
+
+  @@unique([unitId, accountCustomerNumber])
+  @@index([accountCustomerNumber])
+  @@index([soldToCustomerNumber, accountCustomerNumber])
+  @@index([billToCustomerNumber, accountCustomerNumber])
+  @@index([payerCustomerNumber, accountCustomerNumber])
+  @@map("b2b_units")
+}
+
+// Allowed ship-to partners of a B2B unit. The account is repeated here so
+// the database can check that the ship-to belongs to the unit's account.
+model B2bUnitShipTo {
+  unitId                String  @map("unit_id") @db.VarChar(20)
+  customerNumber        String  @map("customer_number") @db.VarChar(20)
+  accountCustomerNumber String  @map("account_customer_number") @db.VarChar(20)
+  isDefault             Boolean @default(false) @map("is_default")
+
+  unit   B2bUnit               @relation(fields: [unitId, accountCustomerNumber], references: [unitId, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+  member CustomerAccountMember @relation(fields: [customerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([unitId, customerNumber])
+  @@unique([unitId], where: { isDefault: true }, map: "b2b_unit_ship_tos_one_default_key")
+  @@index([customerNumber, accountCustomerNumber])
+  @@map("b2b_unit_ship_tos")
 }

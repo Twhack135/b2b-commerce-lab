@@ -1,4 +1,4 @@
-import { IsIn, Matches, ValidateIf } from 'class-validator';
+import { IsIn, Matches, ValidateIf, ValidationOptions } from 'class-validator';
 import { COUNTRY_CODES } from './country-codes';
 
 // Validation rules shared by several ERP modules (materials, customers, ...)
@@ -20,10 +20,12 @@ export function IsNotBlank() {
  * A business key (material number, customer number, ...) must not be blank
  * and must not start or end with whitespace. It is rejected rather than
  * trimmed, so the key the client sends is exactly the key that is stored.
+ * Pass `{ each: true }` to check every entry of a list.
  */
-export function IsBusinessKey() {
+export function IsBusinessKey(options?: ValidationOptions) {
   return Matches(/^\S(.*\S)?$/s, {
     message: '$property must not be blank or start or end with whitespace',
+    ...options,
   });
 }
 
