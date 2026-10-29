@@ -18,6 +18,10 @@ const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
   { method: "GET", path: ["materials", ":materialNumber"] },
   { method: "POST", path: ["materials"] },
   { method: "PATCH", path: ["materials", ":materialNumber"] },
+  { method: "GET", path: ["customers"] },
+  { method: "GET", path: ["customers", ":customerNumber"] },
+  { method: "POST", path: ["customers"] },
+  { method: "PATCH", path: ["customers", ":customerNumber"] },
 ];
 
 /** Read at request time; never taken from the incoming request */

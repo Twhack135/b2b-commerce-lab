@@ -1,14 +1,10 @@
 import { IsString } from 'class-validator';
-import {
-  IsCurrencyCode,
-  IsMaterialNumber,
-  IsNotBlank,
-  IsPrice,
-} from './material-validators';
+import { IsBusinessKey, IsNotBlank } from '../../common/validators';
+import { IsCurrencyCode, IsPrice } from './material-validators';
 
 export class CreateMaterialDto {
   @IsString()
-  @IsMaterialNumber()
+  @IsBusinessKey()
   materialNumber: string;
 
   @IsString()

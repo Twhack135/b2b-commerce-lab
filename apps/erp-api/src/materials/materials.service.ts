@@ -3,15 +3,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Material as MaterialRecord } from '../generated/prisma/client';
+import { Material as MaterialRecord } from '../generated/prisma/client';
+import {
+  isPrismaError,
+  RECORD_NOT_FOUND,
+  UNIQUE_CONSTRAINT_FAILED,
+} from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { Material } from './material.interface';
-
-// Prisma error codes, see https://www.prisma.io/docs/orm/reference/error-reference
-const UNIQUE_CONSTRAINT_FAILED = 'P2002';
-const RECORD_NOT_FOUND = 'P2025';
 
 @Injectable()
 export class MaterialsService {
@@ -90,10 +91,4 @@ function toMaterial(material: MaterialRecord): Material {
 
 function notFound(materialNumber: string): NotFoundException {
   return new NotFoundException(`Material ${materialNumber} not found`);
-}
-
-function isPrismaError(error: unknown, code: string): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === code
-  );
 }

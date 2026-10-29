@@ -104,3 +104,29 @@ describe('UpdateMaterialDto validation', () => {
     );
   });
 });
+
+// The backoffice maps messages to form fields by their first word, so the
+// wording must stay stable when shared validators change
+describe('Material validation messages', () => {
+  it('should keep the exact error messages', async () => {
+    const error: unknown = await validate(
+      {
+        materialNumber: ' MAT-003',
+        description: '   ',
+        price: 1.999,
+        currency: 'eur',
+      },
+      CreateMaterialDto,
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toMatchObject({
+      message: expect.arrayContaining([
+        'materialNumber must not be blank or start or end with whitespace',
+        'description must not be blank',
+        'price must have at most two decimal places',
+        'currency must be exactly three uppercase letters (e.g. EUR)',
+      ]),
+    });
+  });
+});

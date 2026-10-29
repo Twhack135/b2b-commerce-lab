@@ -20,3 +20,18 @@ model Material {
 
   @@map("materials")
 }
+
+// General customer data (comparable to SAP KNA1). Sales-area data such as
+// currency, partner functions and pricing will live in separate tables
+// that reference customer_number.
+model Customer {
+  customerNumber String  @id @map("customer_number") @db.VarChar(20)
+  name           String  @db.VarChar(100)
+  street         String  @db.VarChar(100)
+  postalCode     String  @map("postal_code") @db.VarChar(10)
+  city           String  @db.VarChar(60)
+  country        String  @db.Char(2)
+  isActive       Boolean @default(true) @map("is_active")
+
+  @@map("customers")
+}

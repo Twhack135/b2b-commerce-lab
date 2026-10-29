@@ -94,6 +94,38 @@ describe("allowed routes are forwarded", () => {
     assert.equal(init.method, "PATCH");
     assert.deepEqual(JSON.parse(String(init.body)), changes);
   });
+
+  const customer = {
+    customerNumber: "CUST-0001",
+    name: "Nordwind Heizungsbau GmbH",
+    street: "Hafenstraße 12",
+    postalCode: "20457",
+    city: "Hamburg",
+    country: "DE",
+    isActive: true,
+  };
+
+  for (const [method, path, body, status] of [
+    ["GET", ["customers"], undefined, 200],
+    ["GET", ["customers", "CUST-0001"], undefined, 200],
+    ["POST", ["customers"], customer, 201],
+    ["PATCH", ["customers", "CUST-0001"], { isActive: false }, 200],
+  ] as const) {
+    it(`${method} /${path.join("/")}`, async () => {
+      const fetchMock = mockUpstream(upstreamJson(status, customer));
+
+      const response = await call(method, [...path], body);
+
+      assert.equal(response.status, status);
+      const { url, init } = upstreamCall(fetchMock);
+      assert.equal(url, `http://erp.test:3000/${path.join("/")}`);
+      assert.equal(init.method, method);
+      assert.deepEqual(
+        init.body === undefined ? undefined : JSON.parse(String(init.body)),
+        body,
+      );
+    });
+  }
 });
 
 describe("upstream URL is server-configured", () => {
@@ -137,8 +169,11 @@ describe("upstream URL is server-configured", () => {
 
 describe("blocked routes are never forwarded", () => {
   for (const [method, path] of [
-    ["GET", ["customers"]],
+    ["GET", ["pricing"]],
+    ["GET", ["sales-orders"]],
     ["GET", ["materials", "MAT-001", "history"]],
+    ["GET", ["customers", "CUST-0001", "partners"]],
+    ["GET", ["customers", ".."]],
     ["GET", ["materials", ".."]],
     ["GET", ["materials", "."]],
     ["GET", ["materials", ""]],
@@ -164,6 +199,11 @@ describe("blocked methods are never forwarded", () => {
     ["DELETE", ["materials"], "GET, POST"],
     ["HEAD", ["materials"], "GET, POST"],
     ["OPTIONS", ["materials"], "GET, POST"],
+    ["DELETE", ["customers", "CUST-0001"], "GET, PATCH"],
+    ["PUT", ["customers", "CUST-0001"], "GET, PATCH"],
+    ["POST", ["customers", "CUST-0001"], "GET, PATCH"],
+    ["PATCH", ["customers"], "GET, POST"],
+    ["DELETE", ["customers"], "GET, POST"],
   ] as const) {
     it(`${method} /${path.join("/")} -> 405`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));
