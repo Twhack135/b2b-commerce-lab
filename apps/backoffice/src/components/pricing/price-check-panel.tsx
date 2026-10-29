@@ -246,6 +246,13 @@ function PriceResultView({ result }: { result: PriceResult }) {
             " – no valid price condition"
           )}
         </p>
+        {result.conditionType && (
+          <p data-result="condition-type" className="mt-1 text-sm">
+            <span className="text-ink-muted">Condition type </span>
+            <span className="font-mono font-medium">{result.conditionType.code}</span>{" "}
+            – {result.conditionType.name}
+          </p>
+        )}
       </div>
 
       <PricingAnalysis steps={result.steps} currency={result.currency} />

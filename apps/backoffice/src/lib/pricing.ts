@@ -1,3 +1,4 @@
+import type { ConditionTypeSummary } from "./condition-types";
 import { erpFetch } from "./erp-api";
 import type { PriceConditionScope } from "./price-conditions";
 
@@ -17,6 +18,8 @@ export type PricingStep = {
   conditionId: number | null;
   amount: string | null;
   applied: boolean;
+  /** e.g. ZP02, or ZP01 for the material base price */
+  conditionType: ConditionTypeSummary | null;
 };
 
 /** Result of POST /pricing/price; amounts are decimal strings */
@@ -31,6 +34,8 @@ export type PriceResult = {
   netValue: string;
   currency: string;
   source: PricingSource;
+  /** Condition type of the used price (ZP01 for the base price) */
+  conditionType: ConditionTypeSummary | null;
   conditionId: number | null;
   validFrom: string | null;
   validTo: string | null;

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { listB2bUnits } from "@/lib/b2b-units";
 import { listCustomers } from "@/lib/customers";
+import { conditionTypeLabel } from "@/lib/condition-type-display";
+import { listConditionTypes } from "@/lib/condition-types";
 import { listMaterials } from "@/lib/materials";
 import {
   filterConditions,
@@ -29,6 +31,7 @@ import {
 } from "../list-page";
 import { PriceCheckPanel } from "./price-check-panel";
 import { PriceConditionForm } from "./price-condition-form";
+import { ConditionTypesOverview } from "./condition-types-overview";
 import { PriceConditionTable } from "./price-condition-table";
 
 type Panel =
@@ -46,12 +49,14 @@ export function PricingManagement() {
   const materials = useListData(listMaterials);
   const customers = useListData(listCustomers);
   const units = useListData(listB2bUnits);
+  const conditionTypes = useListData(listConditionTypes);
   const today = useToday();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
   const [materialFilter, setMaterialFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState<PriceConditionScope | "">("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [panel, setPanel] = useState<Panel>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -60,6 +65,7 @@ export function PricingManagement() {
     materials.reload();
     customers.reload();
     units.reload();
+    conditionTypes.reload();
   }
 
   function open(next: Panel) {
@@ -81,6 +87,7 @@ export function PricingManagement() {
   const visible = filterConditions(all, {
     materialNumber: materialFilter,
     scope: scopeFilter,
+    conditionTypeCode: typeFilter,
     status: statusFilter,
     search,
   });
@@ -88,7 +95,8 @@ export function PricingManagement() {
     search.trim() !== "" ||
     statusFilter !== "all" ||
     materialFilter !== "" ||
-    scopeFilter !== "";
+    scopeFilter !== "" ||
+    typeFilter !== "";
   // Materials of the stored conditions, so the filter also works while
   // the material list is loading
   const materialChoices = [
@@ -96,6 +104,8 @@ export function PricingManagement() {
       all.map((c) => [c.materialNumber, c.materialDescription] as const),
     ),
   ].sort(([a], [b]) => a.localeCompare(b));
+  // All configured condition types, in their display order
+  const typeChoices = conditionTypes.items ?? [];
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -170,6 +180,23 @@ export function PricingManagement() {
             </select>
           </label>
 
+          <label className="flex items-center gap-1.5 text-xs text-ink-muted">
+            Type
+            <select
+              aria-label="Filter by condition type"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className={filterSelectClass}
+            >
+              <option value="">All</option>
+              {typeChoices.map((type) => (
+                <option key={type.code} value={type.code}>
+                  {conditionTypeLabel(type)}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
             <SearchInput
               label="Search price conditions"
@@ -212,11 +239,18 @@ export function PricingManagement() {
         )}
       </section>
 
+      <ConditionTypesOverview
+        types={conditionTypes.items}
+        loadError={conditionTypes.loadError}
+      />
+
       {(panel?.kind === "create" || panel?.kind === "edit") && (
         <PriceConditionForm
           // A new key resets the form when another condition is opened
           key={panel.kind === "edit" ? panel.condition.conditionId : "new"}
           condition={panel.kind === "edit" ? panel.condition : undefined}
+          conditionTypes={conditionTypes.items}
+          conditionTypesError={conditionTypes.loadError}
           materials={materials.items}
           customers={customers.items}
           units={units.items}

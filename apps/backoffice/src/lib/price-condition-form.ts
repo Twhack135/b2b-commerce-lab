@@ -5,6 +5,7 @@
 // Only type imports and import-free helpers, so it can be tested directly
 // with `node --test`.
 import type { B2bUnit } from "./b2b-units.ts";
+import type { ConditionType } from "./condition-types.ts";
 import type { Customer } from "./customers.ts";
 import { isCalendarDate } from "./dates.ts";
 import type { Material } from "./materials.ts";
@@ -23,6 +24,8 @@ export const SCOPE_LABELS: Record<PriceConditionScope, string> = {
 
 /** Field names are the ERP API names, so API errors map 1:1 */
 export type PriceConditionFormValues = {
+  /** e.g. ZP02; chosen when creating, fixed afterwards */
+  conditionTypeCode: string;
   materialNumber: string;
   scope: PriceConditionScope | "";
   soldToCustomerNumber: string;
@@ -44,6 +47,7 @@ export type PriceConditionFieldErrors = Partial<
 >;
 
 export const PRICE_CONDITION_FIELDS: PriceConditionFormField[] = [
+  "conditionTypeCode",
   "materialNumber",
   "scope",
   "soldToCustomerNumber",
@@ -55,6 +59,7 @@ export const PRICE_CONDITION_FIELDS: PriceConditionFormField[] = [
 
 /** Readable names for ERP API messages such as "unitId U1 is inactive" */
 export const PRICE_CONDITION_LABELS: Partial<Record<PriceConditionFormField, string>> = {
+  conditionTypeCode: "Condition type",
   materialNumber: "Material",
   soldToCustomerNumber: "Sold-to",
   unitId: "B2B unit",
@@ -63,6 +68,7 @@ export const PRICE_CONDITION_LABELS: Partial<Record<PriceConditionFormField, str
 /** A new condition starts today and is open-ended */
 export function emptyConditionForm(today: string): PriceConditionFormValues {
   return {
+    conditionTypeCode: "",
     materialNumber: "",
     scope: "",
     soldToCustomerNumber: "",
@@ -78,6 +84,7 @@ export function conditionToForm(
   condition: PriceCondition,
 ): PriceConditionFormValues {
   return {
+    conditionTypeCode: condition.conditionType.code,
     materialNumber: condition.materialNumber,
     scope: condition.scope,
     soldToCustomerNumber: condition.soldTo?.customerNumber ?? "",
@@ -132,13 +139,15 @@ type ValidationContext = {
   materials: Material[];
   customers: Customer[];
   units: B2bUnit[];
+  /** The condition types; may be missing while they load */
+  conditionTypes?: ConditionType[];
   /** The stored condition when editing */
   original?: PriceCondition;
 };
 
 export function validatePriceConditionForm(
   values: PriceConditionFormValues,
-  { mode, materials, customers, units, original }: ValidationContext,
+  { mode, materials, customers, units, conditionTypes = [], original }: ValidationContext,
 ): PriceConditionFieldErrors {
   const errors: PriceConditionFieldErrors = {};
 
@@ -149,6 +158,16 @@ export function validatePriceConditionForm(
     mode === "create" || (values.isActive && original?.isActive === false);
 
   if (mode === "create") {
+    // Whether a type can be used is decided by the ERP API and shown in
+    // usableForPriceConditions; the form only repeats that answer
+    const conditionType = conditionTypes.find(
+      (t) => t.code === values.conditionTypeCode,
+    );
+    if (values.conditionTypeCode === "") {
+      errors.conditionTypeCode = "Select a condition type.";
+    } else if (conditionType && !conditionType.usableForPriceConditions) {
+      errors.conditionTypeCode = `Condition type ${conditionType.code} cannot be used for new price conditions.`;
+    }
     if (values.materialNumber === "") {
       errors.materialNumber = "Select a material.";
     } else if (!materials.some((m) => m.materialNumber === values.materialNumber)) {
@@ -223,6 +242,7 @@ export function toCreateInput(
     throw new Error("toCreateInput needs validated values");
   }
   return {
+    conditionTypeCode: values.conditionTypeCode,
     materialNumber: values.materialNumber,
     scope: values.scope,
     // Only the key of the chosen scope is sent
@@ -303,6 +323,8 @@ export type ConditionFilter = {
   materialNumber: string;
   /** "" for all scopes */
   scope: PriceConditionScope | "";
+  /** "" for all condition types */
+  conditionTypeCode?: string;
   status: "all" | "active" | "inactive";
   search: string;
 };
@@ -317,8 +339,12 @@ export function filterConditions(
       (filter.materialNumber === "" ||
         c.materialNumber === filter.materialNumber) &&
       (filter.scope === "" || c.scope === filter.scope) &&
+      (!filter.conditionTypeCode ||
+        c.conditionType.code === filter.conditionTypeCode) &&
       (filter.status === "all" || c.isActive === (filter.status === "active")) &&
       [
+        c.conditionType.code,
+        c.conditionType.name,
         c.materialNumber,
         c.materialDescription,
         c.soldTo?.customerNumber,

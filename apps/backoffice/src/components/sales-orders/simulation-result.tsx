@@ -240,6 +240,11 @@ function ItemTable({ result }: { result: SalesOrderSimulation }) {
                 )}
                 {item.pricing && (
                   <div className="mt-1 text-xs text-ink-muted md:hidden">
+                    {item.pricing.conditionType && (
+                      <span className="font-mono font-medium text-ink">
+                        {item.pricing.conditionType.code}{" "}
+                      </span>
+                    )}
                     {SOURCE_LABELS[item.pricing.source]}
                     <span className="sm:hidden">
                       {" "}· {item.unitPrice && formatAmount(item.unitPrice)} {item.currency} each
@@ -279,6 +284,12 @@ function ItemTable({ result }: { result: SalesOrderSimulation }) {
                 {item.pricing ? (
                   <>
                     <div>{SOURCE_LABELS[item.pricing.source]}</div>
+                    {item.pricing.conditionType && (
+                      <div data-item-condition-type={item.pricing.conditionType.code} className="text-xs">
+                        <span className="font-mono font-medium">{item.pricing.conditionType.code}</span>{" "}
+                        <span className="text-ink-muted">{item.pricing.conditionType.name}</span>
+                      </div>
+                    )}
                     {item.pricing.conditionId !== null && (
                       <div className="text-xs text-ink-muted">condition {item.pricing.conditionId}</div>
                     )}

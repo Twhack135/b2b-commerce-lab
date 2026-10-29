@@ -1,4 +1,5 @@
 import type { PartnerSummary } from "./b2b-units";
+import type { ConditionTypeSummary } from "./condition-types";
 import { erpFetch } from "./erp-api";
 
 export type PriceConditionScope = "B2B_UNIT" | "SOLD_TO";
@@ -19,6 +20,8 @@ export type UnitSummary = {
  */
 export type PriceCondition = {
   conditionId: number;
+  /** e.g. ZP02 Customer Net Price; fixed after creation */
+  conditionType: ConditionTypeSummary;
   materialNumber: string;
   materialDescription: string;
   scope: PriceConditionScope;
@@ -32,6 +35,8 @@ export type PriceCondition = {
 };
 
 export type CreatePriceConditionInput = {
+  /** Required; only types usable for price conditions are accepted */
+  conditionTypeCode: string;
   materialNumber: string;
   scope: PriceConditionScope;
   soldToCustomerNumber?: string;
@@ -43,7 +48,7 @@ export type CreatePriceConditionInput = {
   isActive: boolean;
 };
 
-/** Material, scope, Sold-to or unit and currency cannot be changed */
+/** Condition type, material, scope, Sold-to or unit and currency cannot be changed */
 export type UpdatePriceConditionInput = {
   amount: string;
   validFrom: string;

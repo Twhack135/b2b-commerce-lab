@@ -34,6 +34,9 @@ export function PriceConditionTable({
               Material
             </th>
             <th scope="col" className="hidden px-3 sm:px-4 py-2.5 font-medium md:table-cell">
+              Type
+            </th>
+            <th scope="col" className="hidden px-3 sm:px-4 py-2.5 font-medium md:table-cell">
               Level
             </th>
             <th scope="col" className="hidden px-3 sm:px-4 py-2.5 font-medium sm:table-cell">
@@ -74,7 +77,10 @@ export function PriceConditionTable({
                     {condition.materialDescription}
                   </div>
                   <div className="mt-1 text-xs text-ink-muted md:hidden">
-                    {SCOPE_LABELS[condition.scope]}{" "}
+                    <span className="font-mono font-medium text-ink">
+                      {condition.conditionType.code}
+                    </span>{" "}
+                    · {SCOPE_LABELS[condition.scope]}{" "}
                     <span className="font-mono whitespace-nowrap">
                       {condition.unit?.unitId ?? condition.soldTo?.customerNumber}
                     </span>
@@ -82,6 +88,15 @@ export function PriceConditionTable({
                     {/* May wrap between the dates on small screens */}
                     <Validity condition={condition} canWrap />
                   </div>
+                </td>
+                <td
+                  className="hidden px-3 sm:px-4 py-3 md:table-cell"
+                  data-condition-type={condition.conditionType.code}
+                >
+                  <div className="font-mono text-sm font-medium">
+                    {condition.conditionType.code}
+                  </div>
+                  <div className="text-xs text-ink-muted">{condition.conditionType.name}</div>
                 </td>
                 <td className="hidden px-3 sm:px-4 py-3 md:table-cell">
                   <ScopeBadge scope={condition.scope} />

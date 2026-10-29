@@ -9,6 +9,11 @@ import {
   GENERIC_VALIDATION_MESSAGE,
   splitValidationMessages,
 } from "@/lib/form-errors";
+import {
+  conditionTypeLabel,
+  RESTRICTION_TEXTS,
+} from "@/lib/condition-type-display";
+import type { ConditionType } from "@/lib/condition-types";
 import type { Material } from "@/lib/materials";
 import { formatAmount } from "@/lib/money";
 import {
@@ -55,6 +60,8 @@ const SCOPES: { value: PriceConditionScope; hint: string }[] = [
  */
 export function PriceConditionForm({
   condition,
+  conditionTypes,
+  conditionTypesError,
   materials,
   customers,
   units,
@@ -63,6 +70,8 @@ export function PriceConditionForm({
 }: {
   condition?: PriceCondition;
   /** null while loading */
+  conditionTypes: ConditionType[] | null;
+  conditionTypesError: string | null;
   materials: Material[] | null;
   customers: Customer[] | null;
   units: B2bUnit[] | null;
@@ -89,6 +98,7 @@ export function PriceConditionForm({
     materials: materials ?? [],
     customers: customers ?? [],
     units: units ?? [],
+    conditionTypes: conditionTypes ?? [],
     original: condition,
   });
 
@@ -216,6 +226,54 @@ export function PriceConditionForm({
               </p>
             </div>
           )}
+
+          {/* Condition type: what kind of price this record is */}
+          <Field
+            id="conditionTypeCode"
+            label="Condition type"
+            error={visibleError("conditionTypeCode")}
+            hint={
+              mode === "edit"
+                ? "Cannot be changed."
+                : "Only condition types that are usable for condition records can be selected."
+            }
+          >
+            {condition ? (
+              <ReadOnly>
+                <span data-read-only-condition-type className="font-mono">
+                  {condition.conditionType.code}
+                </span>{" "}
+                – {condition.conditionType.name}
+              </ReadOnly>
+            ) : (
+              <select
+                id="conditionTypeCode"
+                value={values.conditionTypeCode}
+                disabled={conditionTypes === null}
+                onChange={(e) => change({ conditionTypeCode: e.target.value })}
+                onBlur={() => touch("conditionTypeCode")}
+                className={`${inputClass(visibleError("conditionTypeCode"))} bg-surface`}
+              >
+                <option value="">
+                  {conditionTypes === null
+                    ? conditionTypesError
+                      ? "Condition types could not be loaded"
+                      : "Loading condition types…"
+                    : "Select a condition type"}
+                </option>
+                {conditionTypes?.map((type) => (
+                  <option
+                    key={type.code}
+                    value={type.code}
+                    disabled={!type.usableForPriceConditions}
+                  >
+                    {conditionTypeLabel(type)}
+                    {type.restriction ? ` (${RESTRICTION_TEXTS[type.restriction]})` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
 
           {/* Material */}
           <Field

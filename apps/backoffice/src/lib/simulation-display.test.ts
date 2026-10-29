@@ -21,7 +21,7 @@ const item = (itemNumber: number, changes: Partial<SimulatedItem> = {}): Simulat
   unitPrice: "189.50",
   netValue: "1895.00",
   currency: "EUR",
-  pricing: { source: "SOLD_TO", conditionId: 1, validFrom: "2026-01-01", validTo: null, steps: [] },
+  pricing: { source: "SOLD_TO", conditionType: null, conditionId: 1, validFrom: "2026-01-01", validTo: null, steps: [] },
   messages: [],
   ...changes,
 });

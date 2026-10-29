@@ -62,8 +62,8 @@ describe("toPriceRequest", () => {
 
 describe("stepStatus", () => {
   it("distinguishes the applied, the overruled and empty levels", () => {
-    assert.equal(stepStatus({ source: "B2B_UNIT", conditionId: 1, amount: "1.00", applied: true }), "applied");
-    assert.equal(stepStatus({ source: "SOLD_TO", conditionId: 2, amount: "2.00", applied: false }), "not-used");
-    assert.equal(stepStatus({ source: "B2B_UNIT", conditionId: null, amount: null, applied: false }), "none");
+    assert.equal(stepStatus({ source: "B2B_UNIT", conditionId: 1, amount: "1.00", applied: true, conditionType: null }), "applied");
+    assert.equal(stepStatus({ source: "SOLD_TO", conditionId: 2, amount: "2.00", applied: false, conditionType: null }), "not-used");
+    assert.equal(stepStatus({ source: "B2B_UNIT", conditionId: null, amount: null, applied: false, conditionType: null }), "none");
   });
 });

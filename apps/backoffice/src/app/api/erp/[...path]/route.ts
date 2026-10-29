@@ -32,6 +32,8 @@ const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
   { method: "GET", path: ["b2b-units", ":unitId"] },
   { method: "POST", path: ["b2b-units"] },
   { method: "PATCH", path: ["b2b-units", ":unitId"] },
+  // Read-only condition type configuration
+  { method: "GET", path: ["condition-types"] },
   { method: "GET", path: ["price-conditions"] },
   { method: "GET", path: ["price-conditions", ":conditionId"] },
   { method: "POST", path: ["price-conditions"] },

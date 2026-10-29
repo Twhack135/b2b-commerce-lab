@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { B2bUnit } from "./b2b-units.ts";
+import type { ConditionType } from "./condition-types.ts";
 import type { Customer } from "./customers.ts";
 import type { Material } from "./materials.ts";
 import {
@@ -49,9 +50,34 @@ const unit = (unitId: string, isActive = true, soldTo = p("CUST-1000")): B2bUnit
 
 const units = [unit("UNIT-S"), unit("UNIT-OFF", false), unit("UNIT-OLD", true, p("OLD", false))];
 
-const context = { mode: "create" as const, materials, customers, units };
+/** As configured by the migration: only ZP02 and ZP03 are usable */
+const conditionType = (
+  code: string,
+  name: string,
+  restriction: ConditionType["restriction"],
+): ConditionType => ({
+  code,
+  name,
+  conditionClass: "PRICE",
+  calculationType: "QUANTITY",
+  isActive: true,
+  sortOrder: 0,
+  allowedForConditionRecords: restriction === null,
+  usableForPriceConditions: restriction === null,
+  restriction,
+});
+const conditionTypes = [
+  conditionType("ZP01", "List Price", "NOT_ALLOWED_FOR_CONDITION_RECORDS"),
+  conditionType("ZP02", "Customer Net Price", null),
+  conditionType("ZP03", "Special Price", null),
+  conditionType("ZD01", "Customer Discount", "CALCULATION_NOT_SUPPORTED"),
+];
+const ZP02 = { code: "ZP02", name: "Customer Net Price", conditionClass: "PRICE", calculationType: "QUANTITY" } as const;
+
+const context = { mode: "create" as const, materials, customers, units, conditionTypes };
 
 const soldToValues: PriceConditionFormValues = {
+  conditionTypeCode: "ZP02",
   materialNumber: "MAT-001",
   scope: "SOLD_TO",
   soldToCustomerNumber: "CUST-1000",
@@ -72,6 +98,7 @@ const unitValues: PriceConditionFormValues = {
 /** A stored condition as returned by the ERP API */
 const condition = (changes: Partial<PriceCondition> = {}): PriceCondition => ({
   conditionId: 7,
+  conditionType: ZP02,
   materialNumber: "MAT-001",
   materialDescription: "Heat Pump",
   scope: "B2B_UNIT",
@@ -91,6 +118,7 @@ const errorsOf = (values: PriceConditionFormValues) =>
 describe("new condition values", () => {
   it("start today, open-ended and active", () => {
     assert.deepEqual(emptyConditionForm("2026-10-29"), {
+      conditionTypeCode: "",
       materialNumber: "",
       scope: "",
       soldToCustomerNumber: "",
@@ -118,8 +146,9 @@ describe("validatePriceConditionForm", () => {
     assert.deepEqual(errorsOf({ ...unitValues, validTo: "2026-01-01" }), {});
   });
 
-  it("requires material, scope, amount and start", () => {
+  it("requires condition type, material, scope, amount and start", () => {
     assert.deepEqual(errorsOf({ ...emptyConditionForm(""), validFrom: "" }), {
+      conditionTypeCode: "Select a condition type.",
       materialNumber: "Select a material.",
       scope: "Select whether the price is for a B2B unit or a Sold-to.",
       amount: "Amount is required.",
@@ -198,6 +227,7 @@ describe("validatePriceConditionForm", () => {
 describe("API input", () => {
   it("sends only the key of the scope and the currency of the material", () => {
     assert.deepEqual(toCreateInput(soldToValues, materials), {
+      conditionTypeCode: "ZP02",
       materialNumber: "MAT-001",
       scope: "SOLD_TO",
       soldToCustomerNumber: "CUST-1000",
@@ -210,6 +240,7 @@ describe("API input", () => {
     assert.deepEqual(
       toCreateInput({ ...unitValues, materialNumber: "MAT-CH", validTo: "2026-06-30" }, materials),
       {
+        conditionTypeCode: "ZP02",
         materialNumber: "MAT-CH",
         scope: "B2B_UNIT",
         unitId: "UNIT-S",
@@ -296,5 +327,67 @@ describe("filterConditions", () => {
     assert.deepEqual(ids({ search: "thermo" }), [3]);
     assert.deepEqual(ids({ search: "unit-s" }), [1, 3]);
     assert.deepEqual(ids({ scope: "B2B_UNIT", status: "active" }), [1]);
+  });
+});
+
+describe("condition types in the form", () => {
+  it("requires a condition type for a new condition", () => {
+    assert.equal(
+      validatePriceConditionForm({ ...soldToValues, conditionTypeCode: "" }, context).conditionTypeCode,
+      "Select a condition type.",
+    );
+  });
+
+  it("accepts ZP02 and ZP03", () => {
+    for (const conditionTypeCode of ["ZP02", "ZP03"]) {
+      assert.equal(
+        validatePriceConditionForm({ ...soldToValues, conditionTypeCode }, context).conditionTypeCode,
+        undefined,
+      );
+    }
+  });
+
+  it("rejects types the ERP API reports as not usable, e.g. ZP01 and ZD01", () => {
+    for (const conditionTypeCode of ["ZP01", "ZD01"]) {
+      assert.equal(
+        validatePriceConditionForm({ ...soldToValues, conditionTypeCode }, context).conditionTypeCode,
+        `Condition type ${conditionTypeCode} cannot be used for new price conditions.`,
+      );
+    }
+  });
+
+  it("leaves the final check to the ERP API while the types are loading", () => {
+    assert.equal(
+      validatePriceConditionForm(
+        { ...soldToValues, conditionTypeCode: "ZP01" },
+        { ...context, conditionTypes: undefined },
+      ).conditionTypeCode,
+      undefined,
+    );
+  });
+
+  it("does not check the fixed condition type when editing", () => {
+    const original = condition({ conditionType: { ...ZP02, code: "ZOLD", name: "Retired" } });
+    assert.deepEqual(
+      validatePriceConditionForm(conditionToForm(original), { ...context, mode: "edit", original }),
+      {},
+    );
+  });
+
+  it("takes the condition type of a stored condition", () => {
+    assert.equal(conditionToForm(condition()).conditionTypeCode, "ZP02");
+  });
+
+  it("filters and searches by condition type", () => {
+    const zp03 = { ...ZP02, code: "ZP03", name: "Special Price" };
+    const all = [condition({ conditionId: 1 }), condition({ conditionId: 2, conditionType: zp03 })];
+    const base: ConditionFilter = { materialNumber: "", scope: "", status: "all", search: "" };
+    const ids = (filter: Partial<ConditionFilter>) =>
+      filterConditions(all, { ...base, ...filter }).map((c) => c.conditionId);
+    assert.deepEqual(ids({}), [1, 2]);
+    assert.deepEqual(ids({ conditionTypeCode: "ZP03" }), [2]);
+    assert.deepEqual(ids({ conditionTypeCode: "" }), [1, 2]);
+    assert.deepEqual(ids({ search: "special" }), [2]);
+    assert.deepEqual(ids({ search: "zp02" }), [1]);
   });
 });

@@ -39,6 +39,16 @@ export function PricingAnalysis({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="font-medium">{SOURCE_LABELS[step.source]}</span>
+                {step.conditionType && (
+                  <span
+                    data-step-condition-type={step.conditionType.code}
+                    title={step.conditionType.name}
+                    className="ml-2 inline-flex items-center gap-1 rounded bg-canvas px-1.5 py-0.5 text-xs"
+                  >
+                    <span className="font-mono font-medium">{step.conditionType.code}</span>
+                    <span className="text-ink-muted">{step.conditionType.name}</span>
+                  </span>
+                )}
                 {step.conditionId !== null && (
                   <span className="ml-2 text-xs text-ink-muted">condition {step.conditionId}</span>
                 )}

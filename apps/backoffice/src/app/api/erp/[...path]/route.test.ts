@@ -176,6 +176,7 @@ describe("allowed routes are forwarded", () => {
   };
 
   for (const [method, path, body, status] of [
+    ["GET", ["condition-types"], undefined, 200],
     ["GET", ["price-conditions"], undefined, 200],
     ["GET", ["price-conditions", "7"], undefined, 200],
     ["POST", ["price-conditions"], conditionBody, 201],
@@ -318,6 +319,10 @@ describe("blocked routes are never forwarded", () => {
     ["GET", ["price-conditions", ".."]],
     ["PATCH", ["price-conditions", ""]],
     ["GET", ["price-condition"]],
+    // Condition types: only the read-only list
+    ["GET", ["condition-types", "ZP02"]],
+    ["PATCH", ["condition-types", "ZP02"]],
+    ["GET", ["condition-type"]],
     // Sprint 8A resources: only the simulation exists, no sales orders yet
     ["GET", ["sales-orders"]],
     ["POST", ["sales-orders"]],
@@ -367,6 +372,10 @@ describe("blocked methods are never forwarded", () => {
     ["PUT", ["b2b-units"], "GET, POST"],
     ["DELETE", ["b2b-units"], "GET, POST"],
     // Sprint 7A resources: no DELETE, no PUT, the price check only by POST
+    ["POST", ["condition-types"], "GET"],
+    ["PUT", ["condition-types"], "GET"],
+    ["PATCH", ["condition-types"], "GET"],
+    ["DELETE", ["condition-types"], "GET"],
     ["DELETE", ["price-conditions", "7"], "GET, PATCH"],
     ["PUT", ["price-conditions", "7"], "GET, PATCH"],
     ["POST", ["price-conditions", "7"], "GET, PATCH"],

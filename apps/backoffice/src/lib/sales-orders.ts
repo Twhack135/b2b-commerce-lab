@@ -1,4 +1,5 @@
 import type { PartnerSummary } from "./b2b-units";
+import type { ConditionTypeSummary } from "./condition-types";
 import { erpFetch } from "./erp-api";
 import type { PricingSource, PricingStep } from "./pricing";
 
@@ -48,6 +49,8 @@ export type SimulatedItem = {
   currency: string | null;
   pricing: {
     source: PricingSource;
+    /** Condition type of the used price (ZP01 for the base price) */
+    conditionType: ConditionTypeSummary | null;
     conditionId: number | null;
     validFrom: string | null;
     validTo: string | null;
