@@ -27,6 +27,12 @@ export const UsersIcon = (p: IconProps) => (
     d="M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM21 19v-1a4 4 0 0 0-3-3.87M16 3.13a3.5 3.5 0 0 1 0 6.75"
   />
 );
+export const BuildingIcon = (p: IconProps) => (
+  <Icon
+    {...p}
+    d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h2a2 2 0 0 1 2 2v10M2 21h20M8 7h4M8 11h4M8 15h4"
+  />
+);
 export const TagIcon = (p: IconProps) => (
   <Icon
     {...p}

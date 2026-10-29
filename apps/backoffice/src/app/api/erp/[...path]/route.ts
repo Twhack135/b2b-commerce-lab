@@ -9,7 +9,7 @@
 const DEFAULT_ERP_API_URL = "http://localhost:3000";
 const TIMEOUT_MS = 10_000;
 
-type Method = "GET" | "POST" | "PATCH";
+type Method = "GET" | "POST" | "PATCH" | "PUT";
 
 // ":param" matches exactly one path segment, e.g. a material number.
 // Add a line here when a new ERP endpoint should be reachable.
@@ -22,6 +22,16 @@ const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
   { method: "GET", path: ["customers", ":customerNumber"] },
   { method: "POST", path: ["customers"] },
   { method: "PATCH", path: ["customers", ":customerNumber"] },
+  { method: "GET", path: ["customer-accounts"] },
+  { method: "GET", path: ["customer-accounts", ":accountCustomerNumber"] },
+  {
+    method: "PUT",
+    path: ["customer-accounts", ":accountCustomerNumber", "members"],
+  },
+  { method: "GET", path: ["b2b-units"] },
+  { method: "GET", path: ["b2b-units", ":unitId"] },
+  { method: "POST", path: ["b2b-units"] },
+  { method: "PATCH", path: ["b2b-units", ":unitId"] },
 ];
 
 /** Read at request time; never taken from the incoming request */

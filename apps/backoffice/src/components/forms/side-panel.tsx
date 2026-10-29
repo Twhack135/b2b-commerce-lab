@@ -3,6 +3,12 @@
 import { useEffect } from "react";
 import { CloseIcon } from "../icons";
 
+const WIDTHS = {
+  md: "max-w-md",
+  // For forms with lists, e.g. B2B unit partners
+  lg: "max-w-2xl",
+};
+
 /**
  * Panel that slides in from the right, used for create and edit forms.
  * While `isBusy` is true (e.g. saving), it cannot be closed.
@@ -11,11 +17,13 @@ export function SidePanel({
   title,
   isBusy,
   onClose,
+  size = "md",
   children,
 }: {
   title: string;
   isBusy: boolean;
   onClose: () => void;
+  size?: keyof typeof WIDTHS;
   children: React.ReactNode;
 }) {
   // Close with the Escape key, unless a save is in progress
@@ -40,7 +48,7 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="side-panel-title"
-        className="relative flex h-full w-full max-w-md flex-col bg-surface shadow-xl"
+        className={`relative flex h-full w-full ${WIDTHS[size]} flex-col bg-surface shadow-xl`}
       >
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-6">
           <h2 id="side-panel-title" className="text-base font-semibold">

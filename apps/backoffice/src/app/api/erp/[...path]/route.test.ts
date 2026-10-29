@@ -126,6 +126,54 @@ describe("allowed routes are forwarded", () => {
       );
     });
   }
+
+  // Sprint 6A endpoints
+  const unitBody = {
+    unitId: "NW-HAMBURG",
+    name: "Nordwind Hamburg",
+    accountCustomerNumber: "CUST-0001",
+    soldToCustomerNumber: "CUST-0001",
+    billToCustomerNumber: "CUST-0005",
+    payerCustomerNumber: "CUST-0005",
+    shipToCustomerNumbers: ["CUST-0001", "CUST-0004"],
+    defaultShipToCustomerNumber: "CUST-0001",
+  };
+
+  for (const [method, path, body, status] of [
+    ["GET", ["customer-accounts"], undefined, 200],
+    ["GET", ["customer-accounts", "CUST-0001"], undefined, 200],
+    ["PUT", ["customer-accounts", "CUST-0001", "members"], { memberCustomerNumbers: ["CUST-0004"] }, 200],
+    ["GET", ["b2b-units"], undefined, 200],
+    ["GET", ["b2b-units", "NW-HAMBURG"], undefined, 200],
+    ["POST", ["b2b-units"], unitBody, 201],
+    ["PATCH", ["b2b-units", "NW-HAMBURG"], { shipToCustomerNumbers: ["CUST-0004"], defaultShipToCustomerNumber: "CUST-0004" }, 200],
+  ] as const) {
+    it(`${method} /${path.join("/")}`, async () => {
+      const fetchMock = mockUpstream(upstreamJson(status, {}));
+
+      const response = await call(method, [...path], body);
+
+      assert.equal(response.status, status);
+      const { url, init } = upstreamCall(fetchMock);
+      assert.equal(url, `http://erp.test:3000/${path.join("/")}`);
+      assert.equal(init.method, method);
+      assert.deepEqual(
+        init.body === undefined ? undefined : JSON.parse(String(init.body)),
+        body,
+      );
+    });
+  }
+
+  it("encodes the account number inside the members path", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, {}));
+
+    await call("PUT", ["customer-accounts", "A/B", "members"], { memberCustomerNumbers: [] });
+
+    assert.equal(
+      upstreamCall(fetchMock).url,
+      "http://erp.test:3000/customer-accounts/A%2FB/members",
+    );
+  });
 });
 
 describe("upstream URL is server-configured", () => {
@@ -178,6 +226,16 @@ describe("blocked routes are never forwarded", () => {
     ["GET", ["materials", "."]],
     ["GET", ["materials", ""]],
     ["POST", ["prisma"]],
+    // Sprint 6A resources: only the exact implemented paths
+    ["GET", ["customer-accounts", "CUST-0001", "units"]],
+    ["GET", ["customer-accounts", "CUST-0001", "members", "CUST-0004"]],
+    ["PUT", ["customer-accounts", "..", "members"]],
+    ["PUT", ["customer-accounts", "", "members"]],
+    ["GET", ["b2b-units", "NW-HAMBURG", "ship-tos"]],
+    ["POST", ["b2b-units", "NW-HAMBURG", "ship-tos"]],
+    ["GET", ["b2b-units", ".."]],
+    ["GET", ["customer-account-members"]],
+    ["GET", ["b2b-unit-ship-tos"]],
   ] as const) {
     it(`${method} /${path.join("/")} -> 404`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));
@@ -204,6 +262,22 @@ describe("blocked methods are never forwarded", () => {
     ["POST", ["customers", "CUST-0001"], "GET, PATCH"],
     ["PATCH", ["customers"], "GET, POST"],
     ["DELETE", ["customers"], "GET, POST"],
+    // Sprint 6A resources
+    ["POST", ["customer-accounts"], "GET"],
+    ["PUT", ["customer-accounts"], "GET"],
+    ["DELETE", ["customer-accounts", "CUST-0001"], "GET"],
+    ["PATCH", ["customer-accounts", "CUST-0001"], "GET"],
+    ["PUT", ["customer-accounts", "CUST-0001"], "GET"],
+    ["GET", ["customer-accounts", "CUST-0001", "members"], "PUT"],
+    ["POST", ["customer-accounts", "CUST-0001", "members"], "PUT"],
+    ["PATCH", ["customer-accounts", "CUST-0001", "members"], "PUT"],
+    ["DELETE", ["customer-accounts", "CUST-0001", "members"], "PUT"],
+    ["DELETE", ["b2b-units", "NW-HAMBURG"], "GET, PATCH"],
+    ["PUT", ["b2b-units", "NW-HAMBURG"], "GET, PATCH"],
+    ["POST", ["b2b-units", "NW-HAMBURG"], "GET, PATCH"],
+    ["PATCH", ["b2b-units"], "GET, POST"],
+    ["PUT", ["b2b-units"], "GET, POST"],
+    ["DELETE", ["b2b-units"], "GET, POST"],
   ] as const) {
     it(`${method} /${path.join("/")} -> 405`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));

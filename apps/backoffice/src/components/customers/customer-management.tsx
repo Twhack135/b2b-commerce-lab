@@ -7,23 +7,19 @@ import {
   EmptyState,
   LoadError,
   LoadingRows,
+  matchesStatus,
   PageHeader,
   RefreshButton,
   SearchInput,
+  StatusFilter,
+  statusCounts,
   SuccessNotice,
+  type StatusFilterValue,
 } from "../list-page";
 import { CustomerForm } from "./customer-form";
 import { CustomerTable } from "./customer-table";
 
 type Panel = { mode: "create" } | { mode: "edit"; customer: Customer } | null;
-
-type StatusFilter = "all" | "active" | "inactive";
-
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "active", label: "Active" },
-  { value: "inactive", label: "Inactive" },
-];
 
 export function CustomerManagement() {
   const {
@@ -34,7 +30,7 @@ export function CustomerManagement() {
   } = useListData(listCustomers);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
   const [panel, setPanel] = useState<Panel>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -49,17 +45,11 @@ export function CustomerManagement() {
   }
 
   const all = customers ?? [];
-  const counts: Record<StatusFilter, number> = {
-    all: all.length,
-    active: all.filter((customer) => customer.isActive).length,
-    inactive: all.filter((customer) => !customer.isActive).length,
-  };
 
   const query = search.trim().toLowerCase();
   const visibleCustomers = all.filter(
     (customer) =>
-      (statusFilter === "all" ||
-        customer.isActive === (statusFilter === "active")) &&
+      matchesStatus(statusFilter, customer.isActive) &&
       [
         customer.customerNumber,
         customer.name,
@@ -101,36 +91,11 @@ export function CustomerManagement() {
             )}
           </h2>
 
-          <div
-            role="radiogroup"
-            aria-label="Filter by status"
-            className="inline-flex rounded-md border border-line p-0.5"
-          >
-            {STATUS_FILTERS.map((filter) => {
-              const isSelected = statusFilter === filter.value;
-              return (
-                <button
-                  key={filter.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={isSelected}
-                  onClick={() => setStatusFilter(filter.value)}
-                  className={`rounded px-3 py-1 text-xs font-medium ${
-                    isSelected
-                      ? "bg-brand-soft text-brand-strong"
-                      : "text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  {filter.label}
-                  {customers && (
-                    <span className="ml-1 tabular-nums opacity-70">
-                      {counts[filter.value]}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <StatusFilter
+            value={statusFilter}
+            onChange={setStatusFilter}
+            counts={customers ? statusCounts(customers) : undefined}
+          />
 
           <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
             <SearchInput

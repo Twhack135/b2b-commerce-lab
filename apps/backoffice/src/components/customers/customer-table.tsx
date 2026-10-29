@@ -1,5 +1,6 @@
 import { countryName } from "@/lib/countries";
 import type { Customer } from "@/lib/customers";
+import { StatusBadge } from "../list-page";
 
 export function CustomerTable({
   customers,
@@ -97,19 +98,5 @@ export function CustomerTable({
         </tbody>
       </table>
     </div>
-  );
-}
-
-function StatusBadge({ isActive }: { isActive: boolean }) {
-  return isActive ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-0.5 text-xs font-medium text-success">
-      <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
-      Active
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-canvas px-2.5 py-0.5 text-xs font-medium text-ink-muted">
-      <span className="size-1.5 rounded-full bg-ink-muted" aria-hidden="true" />
-      Inactive
-    </span>
   );
 }

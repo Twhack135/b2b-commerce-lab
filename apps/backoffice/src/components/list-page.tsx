@@ -12,11 +12,13 @@ export function PageHeader({
   description,
   actionLabel,
   onAction,
+  secondaryAction,
 }: {
   title: string;
   description: string;
   actionLabel: string;
   onAction: () => void;
+  secondaryAction?: { label: string; onClick: () => void };
 }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
@@ -27,15 +29,104 @@ export function PageHeader({
         <h1 className="mt-1 text-2xl font-semibold">{title}</h1>
         <p className="mt-1 text-ink-muted">{description}</p>
       </div>
-      <button
-        type="button"
-        onClick={onAction}
-        className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 font-medium text-white shadow-sm hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-      >
-        <PlusIcon />
-        {actionLabel}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        {secondaryAction && (
+          <button
+            type="button"
+            onClick={secondaryAction.onClick}
+            className="inline-flex items-center gap-2 rounded-md border border-line bg-surface px-4 py-2 font-medium shadow-sm hover:bg-canvas"
+          >
+            {secondaryAction.label}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onAction}
+          className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 font-medium text-white shadow-sm hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+        >
+          <PlusIcon />
+          {actionLabel}
+        </button>
+      </div>
     </div>
+  );
+}
+
+export type StatusFilterValue = "all" | "active" | "inactive";
+
+const STATUS_FILTERS: { value: StatusFilterValue; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" },
+];
+
+/** True if an item with this status passes the filter */
+export function matchesStatus(filter: StatusFilterValue, isActive: boolean) {
+  return filter === "all" || isActive === (filter === "active");
+}
+
+/** All / Active / Inactive switch with counts */
+export function StatusFilter({
+  value,
+  onChange,
+  counts,
+}: {
+  value: StatusFilterValue;
+  onChange: (value: StatusFilterValue) => void;
+  counts?: Record<StatusFilterValue, number>;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Filter by status"
+      className="inline-flex rounded-md border border-line p-0.5"
+    >
+      {STATUS_FILTERS.map((filter) => {
+        const isSelected = value === filter.value;
+        return (
+          <button
+            key={filter.value}
+            type="button"
+            role="radio"
+            aria-checked={isSelected}
+            onClick={() => onChange(filter.value)}
+            className={`rounded px-3 py-1 text-xs font-medium ${
+              isSelected
+                ? "bg-brand-soft text-brand-strong"
+                : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            {filter.label}
+            {counts && (
+              <span className="ml-1 tabular-nums opacity-70">
+                {counts[filter.value]}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Counts for StatusFilter */
+export function statusCounts(items: { isActive: boolean }[]) {
+  const active = items.filter((item) => item.isActive).length;
+  return { all: items.length, active, inactive: items.length - active };
+}
+
+/** Green "Active" or grey "Inactive" badge */
+export function StatusBadge({ isActive }: { isActive: boolean }) {
+  return isActive ? (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-success">
+      <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+      Active
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-canvas px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-ink-muted">
+      <span className="size-1.5 rounded-full bg-ink-muted" aria-hidden="true" />
+      Inactive
+    </span>
   );
 }
 
