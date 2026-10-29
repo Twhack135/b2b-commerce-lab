@@ -528,6 +528,102 @@ describe('Sales order simulation API', () => {
     });
   });
 
+  describe('requested delivery date', () => {
+    it('is returned with an INFO that it is not confirmed', async () => {
+      const result = await simulate({
+        ...muellerOrder,
+        requestedDeliveryDate: '2026-11-20',
+      });
+
+      expect(result.status).toBe('VALID');
+      expect(
+        (result as unknown as { requestedDeliveryDate: string })
+          .requestedDeliveryDate,
+      ).toBe('2026-11-20');
+      expect(result.messages).toEqual([
+        expect.objectContaining({
+          severity: 'INFO',
+          code: 'REQUESTED_DELIVERY_DATE_NOT_CONFIRMED',
+          field: 'requestedDeliveryDate',
+        }),
+      ]);
+      expect(result.messages[0].text).toContain('not confirmed');
+      expect(
+        result.checks.find((c) => c.check === 'DELIVERY_DATE')?.result,
+      ).toBe('NOT_PERFORMED');
+    });
+
+    it('is null when not requested', async () => {
+      const result = await simulate(muellerOrder);
+      expect(
+        (result as unknown as { requestedDeliveryDate: null })
+          .requestedDeliveryDate,
+      ).toBeNull();
+    });
+
+    it('accepts the order date itself', async () => {
+      const result = await simulate({
+        ...muellerOrder,
+        requestedDeliveryDate: muellerOrder.pricingDate,
+      });
+      expect(result.status).toBe('VALID');
+    });
+
+    it('makes the simulation INVALID if it is before the order date', async () => {
+      const result = await simulate({
+        ...muellerOrder,
+        requestedDeliveryDate: '2026-11-14',
+      });
+
+      expect(result.status).toBe('INVALID');
+      expect(result.totals).toBeNull();
+      expect(result.messages).toEqual([
+        expect.objectContaining({
+          severity: 'ERROR',
+          code: 'REQUESTED_DELIVERY_DATE_BEFORE_ORDER_DATE',
+          field: 'requestedDeliveryDate',
+        }),
+      ]);
+    });
+
+    it('never changes the price, even if another condition is valid on that date', async () => {
+      // On 2026-06-14 the Sold-to price applies; from 2026-06-15 the unit price
+      const order = {
+        ...muellerOrder,
+        unitId: 'UNIT-MUENCHEN',
+        pricingDate: '2026-06-14',
+        items: [{ materialNumber: 'MAT-002', quantity: 10 }],
+      };
+
+      const without = await simulate(order);
+      const withLaterDate = await simulate({
+        ...order,
+        requestedDeliveryDate: '2026-07-01',
+      });
+
+      expect(without.items[0]).toMatchObject({
+        unitPrice: '189.50',
+        netValue: '1895.00',
+      });
+      expect(withLaterDate.items[0]).toMatchObject({
+        unitPrice: '189.50',
+        netValue: '1895.00',
+      });
+      expect(withLaterDate.items[0].pricing?.source).toBe('SOLD_TO');
+      expect(withLaterDate.totals?.netValue).toBe(without.totals?.netValue);
+    });
+
+    it.each(['2026-02-30', '20.11.2026', '2026-11-20T08:00:00Z'])(
+      'answers 400 for %p',
+      async (requestedDeliveryDate) => {
+        await http()
+          .post('/sales-orders/simulate')
+          .send({ ...muellerOrder, requestedDeliveryDate })
+          .expect(400);
+      },
+    );
+  });
+
   describe('read-only', () => {
     it('never changes any data, whatever is simulated', async () => {
       const before = await tableFingerprint(prisma);

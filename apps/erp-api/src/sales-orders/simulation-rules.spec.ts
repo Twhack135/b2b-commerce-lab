@@ -9,6 +9,7 @@ import {
   currencyMessages,
   customerNoteResult,
   optionalText,
+  requestedDeliveryDateMessages,
   resolvePartners,
   sameMaterialMessages,
   shippingMessages,
@@ -476,6 +477,36 @@ describe('checksOf', () => {
       'MATERIALS:FAILED',
       'PRICING:FAILED',
       'CURRENCY:NOT_PERFORMED',
+    ]);
+  });
+});
+
+describe('requestedDeliveryDateMessages', () => {
+  it('reports nothing without a requested date', () => {
+    expect(requestedDeliveryDateMessages(null, '2026-10-29')).toEqual([]);
+  });
+
+  it.each(['2026-10-29', '2026-11-20', '2027-03-01'])(
+    'only informs that %s is not confirmed',
+    (date) => {
+      const [info] = requestedDeliveryDateMessages(date, '2026-10-29');
+      expect(info).toMatchObject({
+        severity: 'INFO',
+        code: 'REQUESTED_DELIVERY_DATE_NOT_CONFIRMED',
+        field: 'requestedDeliveryDate',
+      });
+      expect(info.text).toContain('not confirmed');
+    },
+  );
+
+  it('rejects a date before the order date', () => {
+    expect(requestedDeliveryDateMessages('2026-10-28', '2026-10-29')).toEqual([
+      {
+        severity: 'ERROR',
+        code: 'REQUESTED_DELIVERY_DATE_BEFORE_ORDER_DATE',
+        text: 'The requested delivery date 2026-10-28 is before the order date 2026-10-29.',
+        field: 'requestedDeliveryDate',
+      },
     ]);
   });
 });

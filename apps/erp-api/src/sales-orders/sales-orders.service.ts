@@ -13,6 +13,7 @@ import {
   currencyMessages,
   customerNoteResult,
   optionalText,
+  requestedDeliveryDateMessages,
   resolvePartners,
   sameMaterialMessages,
   shippingMessages,
@@ -40,6 +41,7 @@ export class SalesOrdersService {
       dto.requestedShippingMethod ?? RequestedShippingMethod.STANDARD;
     const customerNote = optionalText(dto.customerNote);
     const customerReference = optionalText(dto.customerReference);
+    const requestedDeliveryDate = dto.requestedDeliveryDate ?? null;
 
     const { unit, pricings } = await readOnlyTransaction(
       this.prisma,
@@ -72,6 +74,7 @@ export class SalesOrdersService {
     const messages = [
       ...partnerResult.messages,
       ...currencyErrors,
+      ...requestedDeliveryDateMessages(requestedDeliveryDate, dto.pricingDate),
       ...note.messages,
       ...shippingMessages(shippingMethod),
       ...sameMaterialMessages(items),
@@ -82,6 +85,7 @@ export class SalesOrdersService {
       simulated: true,
       status,
       pricingDate: dto.pricingDate,
+      requestedDeliveryDate,
       requestedShippingMethod: shippingMethod,
       customerReference,
       customerNote,

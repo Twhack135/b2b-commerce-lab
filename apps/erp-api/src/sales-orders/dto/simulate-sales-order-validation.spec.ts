@@ -51,6 +51,14 @@ describe('SimulateSalesOrderDto validation', () => {
     ],
     ['a whitespace-only note', { ...valid, customerNote: '   ' }],
     [
+      'a requested delivery date',
+      { ...valid, requestedDeliveryDate: '2026-11-20' },
+    ],
+    [
+      'a null requested delivery date',
+      { ...valid, requestedDeliveryDate: null },
+    ],
+    [
       'the same material twice',
       {
         ...valid,
@@ -116,6 +124,22 @@ describe('SimulateSalesOrderDto validation', () => {
     ['a Sold-to in the request', { soldToCustomerNumber: 'CUST-1000' }],
     ['a Bill-to in the request', { billToCustomerNumber: 'CUST-1000' }],
     ['a Payer in the request', { payerCustomerNumber: 'CUST-1000' }],
+    [
+      'an impossible requested delivery date',
+      { requestedDeliveryDate: '2026-02-30' },
+    ],
+    [
+      'a German requested delivery date',
+      { requestedDeliveryDate: '20.11.2026' },
+    ],
+    [
+      'a requested delivery timestamp',
+      { requestedDeliveryDate: '2026-11-20T08:00:00Z' },
+    ],
+    [
+      'a requested delivery date as number',
+      { requestedDeliveryDate: 20261120 },
+    ],
   ])('rejects %s', async (_case, change) => {
     await expect(validate({ ...valid, ...change })).rejects.toThrow(
       BadRequestException,

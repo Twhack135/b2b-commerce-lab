@@ -220,3 +220,70 @@ describe('SalesOrdersService', () => {
     expect(result.totals?.netValue).toBe('2842.50');
   });
 });
+
+describe('SalesOrdersService requested delivery date', () => {
+  let service: SalesOrdersService;
+  const tx = { $executeRaw: jest.fn(), b2bUnit: { findUnique: jest.fn() } };
+  const prisma = { $transaction: jest.fn() };
+  const pricing = { priceItems: jest.fn() };
+
+  beforeEach(async () => {
+    jest.resetAllMocks();
+    prisma.$transaction.mockImplementation(
+      (work: (client: typeof tx) => unknown) => work(tx),
+    );
+    tx.b2bUnit.findUnique.mockResolvedValue(unitRecord);
+    pricing.priceItems.mockResolvedValue([
+      priced('MAT-001', '4500.00', 2),
+      priced('MAT-002', '189.50', 10),
+    ]);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SalesOrdersService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: PricingService, useValue: pricing },
+      ],
+    }).compile();
+    service = module.get(SalesOrdersService);
+  });
+
+  it('returns null without a requested date', async () => {
+    const result = await service.simulate(request);
+    expect(result.requestedDeliveryDate).toBeNull();
+  });
+
+  it('echoes a later date with an INFO and keeps prices on the order date', async () => {
+    const result = await service.simulate({
+      ...request,
+      requestedDeliveryDate: '2027-01-15',
+    });
+
+    expect(result).toMatchObject({
+      status: 'VALID',
+      pricingDate: '2026-11-15',
+      requestedDeliveryDate: '2027-01-15',
+      totals: { netValue: '10895.00' },
+    });
+    expect(result.messages.map((m) => m.code)).toEqual([
+      'REQUESTED_DELIVERY_DATE_NOT_CONFIRMED',
+    ]);
+    // Prices are always determined for the order date
+    expect(pricing.priceItems).toHaveBeenCalledWith(
+      expect.objectContaining({ pricingDate: '2026-11-15' }),
+      tx,
+    );
+  });
+
+  it('is INVALID without a total for a date before the order date', async () => {
+    const result = await service.simulate({
+      ...request,
+      requestedDeliveryDate: '2026-11-14',
+    });
+
+    expect(result.status).toBe('INVALID');
+    expect(result.totals).toBeNull();
+    expect(result.messages.map((m) => m.code)).toEqual([
+      'REQUESTED_DELIVERY_DATE_BEFORE_ORDER_DATE',
+    ]);
+  });
+});

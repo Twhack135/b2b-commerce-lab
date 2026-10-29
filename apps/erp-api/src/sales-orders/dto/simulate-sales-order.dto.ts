@@ -58,9 +58,18 @@ export class SimulateSalesOrderDto {
   @IsCustomerReference()
   shipToCustomerNumber?: string | null;
 
-  // Required, so the result never depends on the server's clock
+  // The order date; business rule: pricing date = order date. Required, so
+  // the result never depends on the server's clock.
+  // LIMITATION: the client supplies it for the simulation. Before real
+  // orders can be placed, the ERP API must determine the order date itself.
   @IsCalendarDate()
   pricingDate: string;
+
+  // Optional wish of the customer; informational only. It is not confirmed
+  // and never changes the pricing date. Must not be before the order date.
+  @IsOptional()
+  @IsCalendarDate()
+  requestedDeliveryDate?: string | null;
 
   // Optional; STANDARD unless stated otherwise
   @IsOptional()

@@ -82,7 +82,10 @@ export interface ProposedOrderBlock {
 export interface SalesOrderSimulation {
   simulated: true;
   status: SimulationStatus;
+  /** The order date; prices valid on this date are used */
   pricingDate: string;
+  /** As requested by the customer; never a confirmed delivery date */
+  requestedDeliveryDate: string | null;
   requestedShippingMethod: RequestedShippingMethod;
   customerReference: string | null;
   customerNote: string | null;

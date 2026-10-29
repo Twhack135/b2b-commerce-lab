@@ -244,6 +244,36 @@ export function shippingMessages(
 }
 
 /**
+ * The requested delivery date is a wish of the customer: it must not be
+ * before the order date, and it is never confirmed by a simulation (no
+ * availability check, no scheduling). It does not affect prices.
+ */
+export function requestedDeliveryDateMessages(
+  requestedDeliveryDate: string | null,
+  orderDate: string,
+): SimulationMessage[] {
+  if (requestedDeliveryDate === null) return [];
+  // YYYY-MM-DD texts compare like dates
+  if (requestedDeliveryDate < orderDate) {
+    return [
+      error(
+        'REQUESTED_DELIVERY_DATE_BEFORE_ORDER_DATE',
+        `The requested delivery date ${requestedDeliveryDate} is before the order date ${orderDate}.`,
+        'requestedDeliveryDate',
+      ),
+    ];
+  }
+  return [
+    message(
+      'INFO',
+      'REQUESTED_DELIVERY_DATE_NOT_CONFIRMED',
+      `Delivery on ${requestedDeliveryDate} is requested. It is not confirmed by this simulation: the delivery date is confirmed during order processing.`,
+      'requestedDeliveryDate',
+    ),
+  ];
+}
+
+/**
  * A non-empty customer note means the real order would receive delivery
  * block SALES_REVIEW. This is a preview only: nothing is stored, and the
  * note never prevents placing the order.
@@ -311,7 +341,10 @@ export function totalsOf(
 /** Checks that are not part of this simulation; their result is unknown */
 export const NOT_PERFORMED_CHECKS: SimulationCheck[] = [
   ['AVAILABILITY', 'Stock availability is not checked; no stock is reserved.'],
-  ['DELIVERY_DATE', 'No delivery date is determined or promised.'],
+  [
+    'DELIVERY_DATE',
+    'No delivery date is determined or promised; a requested delivery date is not checked.',
+  ],
   ['FREIGHT', 'Freight charges are not calculated.'],
   ['TAX', 'Taxes are not calculated; all values are net.'],
   ['CREDIT', 'No credit check is performed.'],
