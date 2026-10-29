@@ -58,6 +58,7 @@ export const RefreshIcon = (p: IconProps) => (
   />
 );
 export const PlusIcon = (p: IconProps) => <Icon {...p} d="M12 5v14M5 12h14" />;
+export const MinusIcon = (p: IconProps) => <Icon {...p} d="M5 12h14" />;
 export const CloseIcon = (p: IconProps) => (
   <Icon {...p} d="M18 6 6 18M6 6l12 12" />
 );

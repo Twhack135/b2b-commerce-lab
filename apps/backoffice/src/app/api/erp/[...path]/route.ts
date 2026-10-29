@@ -38,6 +38,8 @@ const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
   { method: "PATCH", path: ["price-conditions", ":conditionId"] },
   // Calculates only; POST because query strings are not forwarded
   { method: "POST", path: ["pricing", "price"] },
+  // Read-only order simulation; nothing is stored
+  { method: "POST", path: ["sales-orders", "simulate"] },
 ];
 
 /** Read at request time; never taken from the incoming request */

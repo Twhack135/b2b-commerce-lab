@@ -8,27 +8,33 @@ import {
 } from "./icons";
 
 export function PageHeader({
+  eyebrow = "Master Data",
   title,
   description,
   actionLabel,
   onAction,
   secondaryAction,
 }: {
+  /** Small label above the title, e.g. the module area */
+  eyebrow?: string;
   title: string;
   description: string;
-  actionLabel: string;
-  onAction: () => void;
+  /** The primary action is optional, e.g. for tool pages */
+  actionLabel?: string;
+  onAction?: () => void;
   secondaryAction?: { label: string; onClick: () => void };
 }) {
+  const hasActions = (actionLabel && onAction) || secondaryAction;
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div>
         <p className="text-xs font-medium tracking-wide text-ink-muted uppercase">
-          Master Data
+          {eyebrow}
         </p>
         <h1 className="mt-1 text-2xl font-semibold">{title}</h1>
         <p className="mt-1 text-ink-muted">{description}</p>
       </div>
+      {hasActions && (
       <div className="flex flex-wrap gap-2">
         {secondaryAction && (
           <button
@@ -39,15 +45,18 @@ export function PageHeader({
             {secondaryAction.label}
           </button>
         )}
-        <button
-          type="button"
-          onClick={onAction}
-          className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 font-medium text-white shadow-sm hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-        >
-          <PlusIcon />
-          {actionLabel}
-        </button>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 font-medium text-white shadow-sm hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          >
+            <PlusIcon />
+            {actionLabel}
+          </button>
+        )}
       </div>
+      )}
     </div>
   );
 }

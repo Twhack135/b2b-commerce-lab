@@ -209,6 +209,35 @@ describe("allowed routes are forwarded", () => {
     assert.equal(String(upstreamCall(fetchMock).init.body), '{"amount":"0.10"}');
   });
 
+  // Sprint 8A endpoint: read-only order simulation
+  it("POST /sales-orders/simulate with the request body", async () => {
+    const simulation = {
+      unitId: "UNIT-STUTTGART",
+      shipToCustomerNumber: "CUST-1100",
+      pricingDate: "2026-11-15",
+      requestedShippingMethod: "STANDARD",
+      customerReference: "PO-STR-2026-118",
+      customerNote: null,
+      items: [
+        { materialNumber: "MAT-001", quantity: 2 },
+        { materialNumber: "MAT-002", quantity: 10 },
+      ],
+    };
+    const fetchMock = mockUpstream(
+      upstreamJson(200, { status: "INVALID", totals: null }),
+    );
+
+    const response = await call("POST", ["sales-orders", "simulate"], simulation);
+
+    // A business-invalid simulation is a normal 200 answer
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "INVALID", totals: null });
+    const { url, init } = upstreamCall(fetchMock);
+    assert.equal(url, "http://erp.test:3000/sales-orders/simulate");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(String(init.body)), simulation);
+  });
+
   it("encodes the account number inside the members path", async () => {
     const fetchMock = mockUpstream(upstreamJson(200, {}));
 
@@ -289,6 +318,12 @@ describe("blocked routes are never forwarded", () => {
     ["GET", ["price-conditions", ".."]],
     ["PATCH", ["price-conditions", ""]],
     ["GET", ["price-condition"]],
+    // Sprint 8A resources: only the simulation exists, no sales orders yet
+    ["GET", ["sales-orders"]],
+    ["POST", ["sales-orders"]],
+    ["GET", ["sales-orders", "4711"]],
+    ["POST", ["sales-orders", "simulate", "x"]],
+    ["POST", ["sales-orders", "place"]],
   ] as const) {
     it(`${method} /${path.join("/")} -> 404`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));
@@ -341,6 +376,11 @@ describe("blocked methods are never forwarded", () => {
     ["PUT", ["pricing", "price"], "POST"],
     ["PATCH", ["pricing", "price"], "POST"],
     ["DELETE", ["pricing", "price"], "POST"],
+    // The simulation only by POST
+    ["GET", ["sales-orders", "simulate"], "POST"],
+    ["PUT", ["sales-orders", "simulate"], "POST"],
+    ["PATCH", ["sales-orders", "simulate"], "POST"],
+    ["DELETE", ["sales-orders", "simulate"], "POST"],
   ] as const) {
     it(`${method} /${path.join("/")} -> 405`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));

@@ -19,6 +19,8 @@
   --color-danger-soft: #fdecec;
   --color-success: #1e7d45;
   --color-success-soft: #e8f5ed;
+  --color-warning: #8a5300; /* business warnings, e.g. a required review */
+  --color-warning-soft: #fff4dc;
 }
 
 body {

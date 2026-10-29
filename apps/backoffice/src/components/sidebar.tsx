@@ -24,7 +24,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "B2B Units", href: "/b2b-units", icon: BuildingIcon },
   { label: "Pricing", href: "/pricing", icon: TagIcon },
   { label: "Inventory", icon: WarehouseIcon },
-  { label: "Sales Orders", icon: CartIcon },
+  { label: "Sales Orders", href: "/sales-orders", icon: CartIcon },
 ];
 
 export function Sidebar({
