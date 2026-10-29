@@ -1,5 +1,13 @@
-import { IsIn, Matches, ValidateIf, ValidationOptions } from 'class-validator';
+import {
+  IsIn,
+  Matches,
+  ValidateBy,
+  ValidateIf,
+  ValidationArguments,
+  ValidationOptions,
+} from 'class-validator';
 import { COUNTRY_CODES } from './country-codes';
+import { isCalendarDate } from './dates';
 
 // Validation rules shared by several ERP modules (materials, customers, ...)
 
@@ -26,6 +34,18 @@ export function IsBusinessKey(options?: ValidationOptions) {
   return Matches(/^\S(.*\S)?$/s, {
     message: '$property must not be blank or start or end with whitespace',
     ...options,
+  });
+}
+
+/** Calendar date as text in the form YYYY-MM-DD, e.g. 2026-11-15 */
+export function IsCalendarDate() {
+  return ValidateBy({
+    name: 'isCalendarDate',
+    validator: {
+      validate: (value: unknown) => isCalendarDate(value),
+      defaultMessage: (args?: ValidationArguments) =>
+        `${args?.property} must be a valid date in the form YYYY-MM-DD (years 1900 to 9999)`,
+    },
   });
 }
 

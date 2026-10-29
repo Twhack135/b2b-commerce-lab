@@ -31,6 +31,7 @@ describe('Seed', () => {
     await expect(prisma.customer.count()).resolves.toBe(5);
     await expect(prisma.customerAccountMember.count()).resolves.toBe(3);
     await expect(prisma.b2bUnit.count()).resolves.toBe(2);
+    await expect(prisma.priceCondition.count()).resolves.toBe(3);
 
     const defaults = await prisma.b2bUnitShipTo.groupBy({
       by: ['unitId'],

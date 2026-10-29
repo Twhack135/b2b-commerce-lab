@@ -5,6 +5,8 @@ import { B2bUnitsModule } from './b2b-units/b2b-units.module';
 import { CustomerAccountsModule } from './customer-accounts/customer-accounts.module';
 import { CustomersModule } from './customers/customers.module';
 import { MaterialsModule } from './materials/materials.module';
+import { PriceConditionsModule } from './price-conditions/price-conditions.module';
+import { PricingModule } from './pricing/pricing.module';
 
 @Module({
   imports: [
@@ -12,6 +14,8 @@ import { MaterialsModule } from './materials/materials.module';
     CustomersModule,
     CustomerAccountsModule,
     B2bUnitsModule,
+    PriceConditionsModule,
+    PricingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

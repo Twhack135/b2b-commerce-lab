@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,16 +35,23 @@ describe('MaterialsService', () => {
 
   // A fake PrismaService, so the tests run without a real database
   const prismaMock = {
+    $transaction: jest.fn(),
+    // Row lock: SELECT ... FOR UPDATE
+    $queryRaw: jest.fn(),
     material: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
+    priceCondition: { count: jest.fn() },
   };
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    prismaMock.$transaction.mockImplementation(
+      (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -171,6 +182,54 @@ describe('MaterialsService', () => {
       await expect(
         service.update('MAT-404', { description: 'Does not matter' }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should not check price conditions when the currency is not changed', async () => {
+      prismaMock.material.update.mockResolvedValue(heatPumpRecord);
+
+      await service.update('MAT-001', { price: 4500 });
+
+      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+      expect(prismaMock.priceCondition.count).not.toHaveBeenCalled();
+    });
+
+    it('should change the currency when no active condition uses another one', async () => {
+      prismaMock.priceCondition.count.mockResolvedValue(0);
+      prismaMock.material.update.mockResolvedValue({
+        ...heatPumpRecord,
+        currency: 'CHF',
+      });
+
+      await expect(
+        service.update('MAT-001', { currency: 'CHF' }),
+      ).resolves.toMatchObject({ currency: 'CHF' });
+      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prismaMock.priceCondition.count).toHaveBeenCalledWith({
+        where: {
+          materialNumber: 'MAT-001',
+          isActive: true,
+          currency: { not: 'CHF' },
+        },
+      });
+    });
+
+    it('should reject a currency change while active conditions use another currency', async () => {
+      prismaMock.priceCondition.count.mockResolvedValue(2);
+
+      const error = await service
+        .update('MAT-001', { currency: 'CHF' })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      expect(
+        (error as UnprocessableEntityException).getResponse(),
+      ).toMatchObject({
+        statusCode: 422,
+        message: [
+          'currency cannot be changed to CHF: material MAT-001 has 2 active price condition(s) in another currency',
+        ],
+      });
+      expect(prismaMock.material.update).not.toHaveBeenCalled();
     });
   });
 

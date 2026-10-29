@@ -94,6 +94,40 @@ const b2bUnits = [
   },
 ];
 
+// Example prices; open-ended unless validTo is set. Dates are YYYY-MM-DD.
+const priceConditions = [
+  {
+    materialNumber: 'MAT-001',
+    scope: 'SOLD_TO',
+    soldToCustomerNumber: 'CUST-0001',
+    unitId: null,
+    amount: '4350.00',
+    currency: 'EUR',
+    validFrom: '2026-01-01',
+    validTo: null,
+  },
+  {
+    materialNumber: 'MAT-001',
+    scope: 'B2B_UNIT',
+    soldToCustomerNumber: null,
+    unitId: 'NW-BREMEN',
+    amount: '4200.00',
+    currency: 'EUR',
+    validFrom: '2026-01-01',
+    validTo: '2026-12-31',
+  },
+  {
+    materialNumber: 'MAT-002',
+    scope: 'SOLD_TO',
+    soldToCustomerNumber: 'CUST-0001',
+    unitId: null,
+    amount: '189.00',
+    currency: 'EUR',
+    validFrom: '2026-01-01',
+    validTo: null,
+  },
+] as const;
+
 /** Membership row; the owner row points to itself */
 function membership(customerNumber: string, accountCustomerNumber: string) {
   return {
@@ -163,6 +197,30 @@ async function main() {
     });
   }
   console.log(`Seeded ${b2bUnits.length} B2B units`);
+
+  // A condition is only created if its material and Sold-to or unit have no
+  // condition yet, so running the seed again never creates overlaps
+  for (const condition of priceConditions) {
+    const existing = await prisma.priceCondition.findFirst({
+      where: {
+        materialNumber: condition.materialNumber,
+        scope: condition.scope,
+        soldToCustomerNumber: condition.soldToCustomerNumber,
+        unitId: condition.unitId,
+      },
+    });
+    if (existing) continue;
+
+    await prisma.priceCondition.create({
+      data: {
+        ...condition,
+        validFrom: new Date(`${condition.validFrom}T00:00:00.000Z`),
+        validTo:
+          condition.validTo && new Date(`${condition.validTo}T00:00:00.000Z`),
+      },
+    });
+  }
+  console.log(`Seeded ${priceConditions.length} price conditions`);
 }
 
 main()
