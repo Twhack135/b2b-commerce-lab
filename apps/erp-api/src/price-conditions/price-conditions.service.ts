@@ -5,16 +5,27 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { fromDbDate, toDbDate } from '../common/dates';
-import { formatAmount } from '../common/money';
+import { currencyPrecisionError, formatInCurrency } from '../common/money';
 import { toPartnerSummary } from '../common/partner-summary';
 import {
   conditionTypeViolations,
+  scopeViolations,
   toConditionTypeSummary,
 } from '../condition-types/condition-type-rules';
 import { Prisma } from '../generated/prisma/client';
 import { PriceConditionScope } from '../generated/prisma/enums';
 import { EXCLUSION_VIOLATION, isPostgresError } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  findSalesArea,
+  formatSalesArea,
+  SalesAreaKey,
+  salesAreaKeyOf,
+  salesAreaViolations,
+  SalesAreaWithCurrency,
+  sameSalesArea,
+  unitNotInSalesArea,
+} from '../sales-areas/sales-area-key';
 import { CreatePriceConditionDto } from './dto/create-price-condition.dto';
 import { UpdatePriceConditionDto } from './dto/update-price-condition.dto';
 import { PriceCondition } from './price-condition.interface';
@@ -24,6 +35,7 @@ const CONDITION_INCLUDE = {
   material: true,
   soldTo: true,
   unit: { include: { soldTo: { include: { customer: true } } } },
+  salesOrgCurrency: { include: { currency: true } },
 } satisfies Prisma.PriceConditionInclude;
 
 type ConditionRecord = Prisma.PriceConditionGetPayload<{
@@ -32,8 +44,11 @@ type ConditionRecord = Prisma.PriceConditionGetPayload<{
 
 type Db = Prisma.TransactionClient;
 
-/** What a condition is for: a Sold-to or a B2B unit (the other one is null) */
-type ConditionKey = {
+/**
+ * What a condition is for: the sales area, and in it a Sold-to, a B2B unit
+ * or nothing more (list price of the sales area)
+ */
+type ConditionKey = SalesAreaKey & {
   scope: PriceConditionScope;
   soldToCustomerNumber: string | null;
   unitId: string | null;
@@ -53,6 +68,9 @@ export class PriceConditionsService {
     const conditions = await this.prisma.priceCondition.findMany({
       include: CONDITION_INCLUDE,
       orderBy: [
+        { salesOrganization: 'asc' },
+        { distributionChannel: 'asc' },
+        { division: 'asc' },
         { materialNumber: 'asc' },
         { scope: 'asc' },
         { soldToCustomerNumber: 'asc' },
@@ -84,9 +102,10 @@ export class PriceConditionsService {
     let conditionId: number;
     try {
       conditionId = await this.prisma.$transaction(async (tx) => {
-        const material = await lockMaterial(tx, dto.materialNumber);
+        const materialExists = await lockMaterial(tx, dto.materialNumber);
 
         const key: ConditionKey = {
+          ...salesAreaKeyOf(dto),
           scope: dto.scope,
           soldToCustomerNumber: dto.soldToCustomerNumber ?? null,
           unitId: dto.unitId ?? null,
@@ -97,15 +116,24 @@ export class PriceConditionsService {
         };
         const isActive = dto.isActive ?? true;
 
-        const violations = await checkConditionType(tx, dto.conditionTypeCode);
+        const salesArea = await findSalesArea(tx, key);
+        const violations = salesAreaViolations(key, salesArea);
         violations.push(
-          ...(material
-            ? checkCurrency(dto.materialNumber, material.currency, dto.currency)
-            : [`materialNumber ${dto.materialNumber} does not exist`]),
+          ...(await checkConditionType(tx, dto.conditionTypeCode, dto.scope)),
         );
-        violations.push(...(await checkKey(tx, key)));
+        if (!materialExists) {
+          violations.push(
+            `materialNumber ${dto.materialNumber} does not exist`,
+          );
+        }
+        // Market checks need a configured sales area
+        if (salesArea) {
+          violations.push(...checkCurrency(salesArea, dto.currency));
+          violations.push(...checkAmount(salesArea, dto.amount));
+          violations.push(...(await checkKey(tx, key)));
+        }
         violations.push(...checkPeriod(period));
-        if (violations.length > 0) {
+        if (!salesArea || violations.length > 0) {
           throw new UnprocessableEntityException(violations);
         }
 
@@ -119,7 +147,8 @@ export class PriceConditionsService {
             materialNumber: dto.materialNumber,
             ...key,
             amount: dto.amount,
-            currency: dto.currency,
+            // Always the currency of the sales area
+            currency: salesArea.currency.code,
             validFrom: toDbDate(period.validFrom),
             validTo: period.validTo === null ? null : toDbDate(period.validTo),
             isActive,
@@ -134,8 +163,9 @@ export class PriceConditionsService {
   }
 
   /**
-   * Changes amount, validity period and status. Material, scope, key and
-   * currency cannot be changed; a different key needs a new condition.
+   * Changes amount, validity period and status. Condition type, sales area,
+   * material, scope, key and currency cannot be changed; a different key
+   * needs a new condition.
    */
   async update(
     conditionId: number,
@@ -154,7 +184,7 @@ export class PriceConditionsService {
         if (!before) {
           throw notFound(conditionId);
         }
-        const material = await lockMaterial(tx, before.materialNumber);
+        await lockMaterial(tx, before.materialNumber);
 
         // Read again after the lock, so a concurrent update of the same
         // condition has committed and its result is the starting point
@@ -162,6 +192,7 @@ export class PriceConditionsService {
           where: { conditionId },
         });
         const key: ConditionKey = {
+          ...salesAreaKeyOf(current),
           scope: current.scope,
           soldToCustomerNumber: current.soldToCustomerNumber,
           unitId: current.unitId,
@@ -174,23 +205,26 @@ export class PriceConditionsService {
               : dto.validTo,
         };
         const isActive = dto.isActive ?? current.isActive;
+        // The sales area of a stored condition always exists (foreign key)
+        const salesArea = (await findSalesArea(tx, key))!;
 
         const violations = checkPeriod(period);
+        if (dto.amount !== undefined) {
+          violations.push(...checkAmount(salesArea, dto.amount));
+        }
         // A reactivated condition must be valid like a new one. An active
-        // condition stays valid when its Sold-to, unit or condition type
-        // becomes inactive.
+        // condition stays valid when its Sold-to, unit, condition type or
+        // sales area becomes inactive.
         if (isActive && !current.isActive) {
+          violations.push(...salesAreaViolations(key, salesArea));
           violations.push(
-            ...(await checkConditionType(tx, current.conditionTypeCode)),
+            ...(await checkConditionType(
+              tx,
+              current.conditionTypeCode,
+              current.scope,
+            )),
           );
           violations.push(...(await checkKey(tx, key)));
-          violations.push(
-            ...checkCurrency(
-              current.materialNumber,
-              material!.currency,
-              current.currency,
-            ),
-          );
         }
         if (violations.length > 0) {
           throw new UnprocessableEntityException(violations);
@@ -229,45 +263,90 @@ export class PriceConditionsService {
 
 /**
  * Locks the material row on the transaction's connection. All writes of
- * price conditions for one material (and currency changes of the material)
- * wait for each other here, so the overlap check always sees every
- * committed condition. Returns undefined if the material does not exist.
+ * price conditions for one material wait for each other here, so the
+ * overlap check always sees every committed condition. Returns false if
+ * the material does not exist.
  */
 async function lockMaterial(db: Db, materialNumber: string) {
-  const rows = await db.$queryRaw<{ currency: string }[]>`
-    SELECT currency FROM materials
+  const rows = await db.$queryRaw<{ material_number: string }[]>`
+    SELECT material_number FROM materials
     WHERE material_number = ${materialNumber} FOR UPDATE`;
-  return rows[0];
+  return rows.length > 0;
 }
 
-/** The condition type must exist, be active and be supported for prices */
-async function checkConditionType(db: Db, code: string): Promise<string[]> {
-  const type = await db.conditionType.findUnique({ where: { code } });
-  return conditionTypeViolations(code, type);
+/**
+ * The condition type must exist, be active, be supported for prices and be
+ * configured for the scope (e.g. ZP01 only for SALES_AREA)
+ */
+async function checkConditionType(
+  db: Db,
+  code: string,
+  scope: PriceConditionScope,
+): Promise<string[]> {
+  const type = await db.conditionType.findUnique({
+    where: { code },
+    include: { allowedScopes: true },
+  });
+  const violations = conditionTypeViolations(code, type);
+  if (violations.length > 0 || !type) return violations;
+  return scopeViolations(code, type, scope);
 }
 
+/** The currency comes from the sales area; a sent currency must match it */
 function checkCurrency(
-  materialNumber: string,
-  materialCurrency: string,
-  currency: string,
+  salesArea: SalesAreaWithCurrency,
+  currency: string | undefined,
 ): string[] {
-  return currency === materialCurrency
+  return currency === undefined || currency === salesArea.currency.code
     ? []
     : [
-        `currency must be ${materialCurrency}, the currency of material ${materialNumber}`,
+        `currency must be ${salesArea.currency.code}, the currency of sales area ${formatSalesArea(salesArea.key)}`,
       ];
 }
 
-/** The Sold-to or unit must exist and be active; a unit also needs an active Sold-to */
+/** The amount must fit the decimal places of the currency (JPY: none) */
+function checkAmount(
+  salesArea: SalesAreaWithCurrency,
+  amount: string,
+): string[] {
+  const error = currencyPrecisionError(
+    'amount',
+    new Prisma.Decimal(amount),
+    salesArea.currency,
+  );
+  return error ? [error] : [];
+}
+
+/**
+ * The key must be usable in the sales area: a Sold-to must exist, be active
+ * and be actively assigned to the sales area; a unit must exist, be active,
+ * have an active Sold-to and belong to the sales area. The list price of a
+ * sales area has no further key.
+ */
 async function checkKey(db: Db, key: ConditionKey): Promise<string[]> {
+  const area = formatSalesArea(key);
+  if (key.scope === PriceConditionScope.SALES_AREA) return [];
+
   if (key.scope === PriceConditionScope.SOLD_TO) {
     const number = key.soldToCustomerNumber!;
     const customer = await db.customer.findUnique({
       where: { customerNumber: number },
+      include: { salesAreas: { where: salesAreaKeyOf(key) } },
     });
     if (!customer) return [`soldToCustomerNumber ${number} does not exist`];
     if (!customer.isActive)
       return [`soldToCustomerNumber ${number} is inactive`];
+    const assignment = customer.salesAreas[0];
+    if (!assignment) {
+      return [
+        `soldToCustomerNumber ${number} is not assigned to sales area ${area}`,
+      ];
+    }
+    if (!assignment.isActive) {
+      return [
+        `soldToCustomerNumber ${number} is inactive in sales area ${area}`,
+      ];
+    }
     return [];
   }
 
@@ -277,6 +356,9 @@ async function checkKey(db: Db, key: ConditionKey): Promise<string[]> {
     include: { soldTo: { include: { customer: true } } },
   });
   if (!unit) return [`unitId ${unitId} does not exist`];
+  if (!sameSalesArea(unit, key)) {
+    return [unitNotInSalesArea(unitId, unit, key)];
+  }
   const violations: string[] = [];
   if (!unit.isActive) violations.push(`unitId ${unitId} is inactive`);
   if (!unit.soldTo.customer.isActive) {
@@ -295,9 +377,9 @@ function checkPeriod(period: Period): string[] {
 }
 
 /**
- * Active conditions with the same material and key must not overlap.
- * The exclusion constraints in the database enforce the same rule; this
- * check gives the client a clear message with the conflicting condition.
+ * Active conditions with the same sales area, material and key must not
+ * overlap. The exclusion constraints in the database enforce the same rule;
+ * this check gives the client a clear message with the conflicting condition.
  */
 async function assertNoOverlap(
   db: Db,
@@ -354,6 +436,7 @@ function toPriceCondition(condition: ConditionRecord): PriceCondition {
   return {
     conditionId: condition.conditionId,
     conditionType: toConditionTypeSummary(condition.conditionType),
+    salesArea: salesAreaKeyOf(condition),
     materialNumber: condition.materialNumber,
     materialDescription: condition.material.description,
     scope: condition.scope,
@@ -364,7 +447,11 @@ function toPriceCondition(condition: ConditionRecord): PriceCondition {
       isActive: condition.unit.isActive,
       soldTo: toPartnerSummary(condition.unit.soldTo.customer),
     },
-    amount: formatAmount(condition.amount),
+    // With the decimal places of the currency, e.g. "4400.00" or "700000"
+    amount: formatInCurrency(
+      condition.amount,
+      condition.salesOrgCurrency.currency,
+    ),
     currency: condition.currency,
     validFrom: fromDbDate(condition.validFrom),
     validTo: condition.validTo && fromDbDate(condition.validTo),

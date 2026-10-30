@@ -1,10 +1,20 @@
 // Business rules of the order simulation, without database access, so every
 // rule can be tested directly. Comparable to the checks of an SAP sales
 // order simulation (VA01 "Simulate"): nothing is saved.
-import { Decimal, formatAmount } from '../common/money';
+import { CurrencyPrecision, Decimal, formatInCurrency } from '../common/money';
 import { PartnerSummary, toPartnerSummary } from '../common/partner-summary';
 import { Prisma } from '../generated/prisma/client';
-import { ItemPricing, toResultSteps } from '../pricing/pricing.service';
+import {
+  ItemPricing,
+  noPriceText,
+  toResultSteps,
+} from '../pricing/pricing.service';
+import {
+  formatSalesArea,
+  SalesAreaKey,
+  SalesAreaWithCurrency,
+  sameSalesArea,
+} from '../sales-areas/sales-area-key';
 import { RequestedShippingMethod } from './dto/simulate-sales-order.dto';
 import {
   ProposedOrderBlock,
@@ -145,43 +155,109 @@ export function resolvePartners(
 }
 
 /**
+ * The sales area must exist and be active, and the unit must belong to it.
+ * Otherwise nothing is priced: a unit is never priced with the conditions
+ * of another market.
+ */
+export function salesAreaMessages(
+  key: SalesAreaKey,
+  salesArea: SalesAreaWithCurrency | null,
+  unit: (SalesAreaKey & { unitId: string }) | null,
+): SimulationMessage[] {
+  const area = formatSalesArea(key);
+  if (!salesArea) {
+    return [
+      error(
+        'SALES_AREA_NOT_FOUND',
+        `Sales area ${area} does not exist.`,
+        'salesOrganization',
+      ),
+    ];
+  }
+  const messages: SimulationMessage[] = [];
+  if (!salesArea.isActive) {
+    messages.push(
+      error(
+        'SALES_AREA_INACTIVE',
+        `Sales area ${area} is inactive.`,
+        'salesOrganization',
+      ),
+    );
+  }
+  if (unit && !sameSalesArea(unit, key)) {
+    messages.push(
+      error(
+        'UNIT_NOT_IN_SALES_AREA',
+        `B2B unit ${unit.unitId} belongs to sales area ${formatSalesArea(unit)}, not ${area}.`,
+        'unitId',
+      ),
+    );
+  }
+  return messages;
+}
+
+/**
  * One result per requested position, in request order. Positions with the
- * same material stay separate and are priced on their own.
+ * same material stay separate and are priced on their own. Amounts have the
+ * decimal places of the document currency (JPY: none).
  */
 export function buildItems(
   requested: { materialNumber: string; quantity: number }[],
   pricings: ItemPricing[],
+  context: {
+    salesArea: SalesAreaKey;
+    pricingDate: string;
+    currency: CurrencyPrecision | null;
+  },
 ): { items: SimulatedItem[]; netValues: (Decimal | null)[] } {
   const netValues: (Decimal | null)[] = [];
   const items = requested.map((position, index): SimulatedItem => {
     const itemNumber = (index + 1) * ITEM_NUMBER_STEP;
     const { material, determination } = pricings[index];
-    netValues.push(determination?.netValue ?? null);
+    const priced =
+      determination?.status === 'PRICED' && context.currency
+        ? determination
+        : null;
+    const format = (value: Decimal) =>
+      formatInCurrency(value, context.currency!);
+    netValues.push(priced?.netValue ?? null);
+
+    const messages: SimulationMessage[] = [];
+    if (!material) {
+      messages.push(
+        error(
+          'MATERIAL_NOT_FOUND',
+          `Material ${position.materialNumber} does not exist.`,
+          'materialNumber',
+        ),
+      );
+    } else if (determination?.status === 'NO_PRICE_FOUND') {
+      messages.push(
+        error(
+          'NO_PRICE_FOUND',
+          `${noPriceText(position.materialNumber, context.salesArea, context.pricingDate)}.`,
+          'materialNumber',
+        ),
+      );
+    }
+
     return {
       itemNumber,
       materialNumber: position.materialNumber,
       materialDescription: material?.description ?? null,
       quantity: position.quantity,
-      unitPrice: determination ? formatAmount(determination.unitPrice) : null,
-      netValue: determination ? formatAmount(determination.netValue) : null,
-      currency: determination?.currency ?? null,
-      pricing: determination && {
-        source: determination.source,
-        conditionType: determination.conditionType,
-        conditionId: determination.condition?.conditionId ?? null,
-        validFrom: determination.condition?.validFrom ?? null,
-        validTo: determination.condition?.validTo ?? null,
-        steps: toResultSteps(determination.steps),
+      unitPrice: priced ? format(priced.unitPrice) : null,
+      netValue: priced ? format(priced.netValue) : null,
+      currency: priced?.currency ?? null,
+      pricing: priced && {
+        source: priced.source,
+        conditionType: priced.conditionType,
+        conditionId: priced.condition.conditionId,
+        validFrom: priced.condition.validFrom,
+        validTo: priced.condition.validTo,
+        steps: toResultSteps(priced.steps, context.currency!),
       },
-      messages: material
-        ? []
-        : [
-            error(
-              'MATERIAL_NOT_FOUND',
-              `Material ${position.materialNumber} does not exist.`,
-              'materialNumber',
-            ),
-          ],
+      messages,
     };
   });
   return { items, netValues };
@@ -209,7 +285,11 @@ export function sameMaterialMessages(
     );
 }
 
-/** An order has exactly one document currency */
+/**
+ * An order has exactly one document currency, the currency of its sales
+ * area. All prices are determined in it, so this can only fail through a
+ * programming error; it stays as a safety net.
+ */
 export function currencyMessages(items: SimulatedItem[]): SimulationMessage[] {
   const currencies = [
     ...new Set(items.flatMap((item) => (item.currency ? [item.currency] : []))),
@@ -321,20 +401,23 @@ export function simulationStatus(
   return 'VALID';
 }
 
-/** Exact sum of all item net values; none for an invalid simulation */
+/**
+ * Exact sum of all item net values in the document currency; none for an
+ * invalid simulation
+ */
 export function totalsOf(
   status: SimulationStatus,
-  items: SimulatedItem[],
   netValues: (Decimal | null)[],
+  currency: (CurrencyPrecision & { code: string }) | null,
 ): SalesOrderSimulation['totals'] {
-  if (status === 'INVALID') return null;
+  if (status === 'INVALID' || !currency) return null;
   const sum = netValues.reduce<Decimal>(
     (total, value) => total.plus(value!),
     new Prisma.Decimal(0),
   );
   return {
-    netValue: formatAmount(sum),
-    currency: items[0].currency!,
+    netValue: formatInCurrency(sum, currency),
+    currency: currency.code,
     includes: 'NET_EXCL_TAX_AND_FREIGHT',
   };
 }
@@ -354,6 +437,7 @@ export const NOT_PERFORMED_CHECKS: SimulationCheck[] = [
 ].map(([check, text]) => ({ check, result: 'NOT_PERFORMED', text }));
 
 export function checksOf(
+  salesAreaErrors: SimulationMessage[],
   partnerMessages: SimulationMessage[],
   items: SimulatedItem[],
   currencyErrors: SimulationMessage[],
@@ -362,10 +446,15 @@ export function checksOf(
     ok ? 'PASSED' : 'FAILED';
   const pricedItems = items.filter((item) => item.pricing !== null);
   return [
+    { check: 'SALES_AREA', result: passed(salesAreaErrors.length === 0) },
     { check: 'PARTNERS', result: passed(partnerMessages.length === 0) },
     {
       check: 'MATERIALS',
-      result: passed(items.every((item) => item.messages.length === 0)),
+      result: passed(
+        items.every((item) =>
+          item.messages.every((m) => m.code !== 'MATERIAL_NOT_FOUND'),
+        ),
+      ),
     },
     { check: 'PRICING', result: passed(pricedItems.length === items.length) },
     pricedItems.length === 0

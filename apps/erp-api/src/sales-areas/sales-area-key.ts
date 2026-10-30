@@ -33,6 +33,19 @@ export function isSalesAreaKey(key: SalesAreaKey): boolean {
   );
 }
 
+/** Validation message: a unit is used outside its own sales area */
+export function unitNotInSalesArea(
+  unitId: string,
+  unitArea: SalesAreaKey,
+  requested: SalesAreaKey,
+): string {
+  return `unitId ${unitId} belongs to sales area ${formatSalesArea(unitArea)}, not ${formatSalesArea(requested)}`;
+}
+
+export function sameSalesArea(a: SalesAreaKey, b: SalesAreaKey): boolean {
+  return formatSalesArea(a) === formatSalesArea(b);
+}
+
 /**
  * Violations if the sales area is not configured or cannot be used: the
  * sales area and its sales organization must be active. Only listed
@@ -43,13 +56,63 @@ export async function checkSalesArea(
   key: SalesAreaKey,
 ): Promise<string[]> {
   const area = await db.salesArea.findUnique({
-    where: { salesOrganization_distributionChannel_division: key },
+    // Only the key fields: callers may pass larger objects (e.g. a condition key)
+    where: {
+      salesOrganization_distributionChannel_division: salesAreaKeyOf(key),
+    },
     include: { organization: true },
   });
   if (!area) {
     return [`salesArea ${formatSalesArea(key)} does not exist`];
   }
   if (!area.isActive || !area.organization.isActive) {
+    return [`salesArea ${formatSalesArea(key)} is inactive`];
+  }
+  return [];
+}
+
+/** A configured sales area with the currency of its sales organization */
+export interface SalesAreaWithCurrency {
+  key: SalesAreaKey;
+  /** The sales area and its sales organization are active */
+  isActive: boolean;
+  /** Document currency of the sales area, e.g. { code: 'JPY', decimals: 0 } */
+  currency: { code: string; decimals: number };
+}
+
+/** The sales area with its currency, or null if it is not configured */
+export async function findSalesArea(
+  db: Prisma.TransactionClient,
+  key: SalesAreaKey,
+): Promise<SalesAreaWithCurrency | null> {
+  if (!isSalesAreaKey(key)) return null;
+  const area = await db.salesArea.findUnique({
+    // Only the key fields: callers may pass larger objects (e.g. a condition key)
+    where: {
+      salesOrganization_distributionChannel_division: salesAreaKeyOf(key),
+    },
+    include: { organization: { include: { currency: true } } },
+  });
+  if (!area) return null;
+  return {
+    key: salesAreaKeyOf(area),
+    isActive: area.isActive && area.organization.isActive,
+    currency: {
+      code: area.organization.currency.code,
+      decimals: area.organization.currency.decimals,
+    },
+  };
+}
+
+/** Why the sales area cannot be used, as validation messages */
+export function salesAreaViolations(
+  key: SalesAreaKey,
+  area: SalesAreaWithCurrency | null,
+): string[] {
+  if (!area) {
+    return [`salesArea ${formatSalesArea(key)} does not exist`];
+  }
+  if (!area.isActive) {
     return [`salesArea ${formatSalesArea(key)} is inactive`];
   }
   return [];

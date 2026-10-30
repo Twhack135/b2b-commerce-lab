@@ -1,6 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { createPricingData, createTestApp, resetDatabase } from './helpers';
+import {
+  createPricingData,
+  createTestApp,
+  GERMANY,
+  LIST_PRICE_ID,
+  POLAND,
+  resetDatabase,
+} from './helpers';
 
 const ZP02 = {
   code: 'ZP02',
@@ -11,6 +18,7 @@ const ZP02 = {
 
 const soldToBody = {
   conditionTypeCode: 'ZP02',
+  ...GERMANY,
   materialNumber: 'MAT-1',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'ACC',
@@ -22,6 +30,7 @@ const soldToBody = {
 
 const unitBody = {
   conditionTypeCode: 'ZP02',
+  ...GERMANY,
   materialNumber: 'MAT-1',
   scope: 'B2B_UNIT',
   unitId: 'U1',
@@ -49,6 +58,16 @@ describe('Price conditions API', () => {
   });
 
   const create = (body: object) => http().post('/price-conditions').send(body);
+  // Conditions created by the test; the test data adds list prices from
+  // LIST_PRICE_ID on
+  const own = { conditionId: { lt: LIST_PRICE_ID } };
+  const ownCount = () => prisma.priceCondition.count({ where: own });
+  const ownListed = async () => {
+    const { body } = await http().get('/price-conditions').expect(200);
+    return (body as { conditionId: number }[]).filter(
+      (c) => c.conditionId < LIST_PRICE_ID,
+    );
+  };
 
   describe('POST /price-conditions', () => {
     it('creates a Sold-to condition and returns it with summaries', async () => {
@@ -57,6 +76,7 @@ describe('Price conditions API', () => {
       expect(response.body).toEqual({
         conditionId: expect.any(Number) as unknown,
         conditionType: ZP02,
+        salesArea: GERMANY,
         materialNumber: 'MAT-1',
         materialDescription: 'Heat Pump',
         scope: 'SOLD_TO',
@@ -95,7 +115,9 @@ describe('Price conditions API', () => {
         201,
       );
       expect((body as { amount: string }).amount).toBe('0.10');
-      const stored = await prisma.priceCondition.findFirstOrThrow();
+      const stored = await prisma.priceCondition.findFirstOrThrow({
+        where: own,
+      });
       expect(stored.amount.toFixed(2)).toBe('0.10');
     });
 
@@ -124,7 +146,7 @@ describe('Price conditions API', () => {
         message: `The validity period overlaps with active price condition ${id} (2026-01-01 to 2026-12-31)`,
         conflictingConditionId: id,
       });
-      await expect(prisma.priceCondition.count()).resolves.toBe(1);
+      await expect(ownCount()).resolves.toBe(1);
     });
 
     it('allows an inactive condition for an overlapping period', async () => {
@@ -139,9 +161,24 @@ describe('Price conditions API', () => {
         'materialNumber NOPE does not exist',
       ],
       [
-        'another currency',
-        { currency: 'CHF' },
-        'currency must be EUR, the currency of material MAT-1',
+        'another currency than the sales area',
+        { currency: 'PLN' },
+        'currency must be EUR, the currency of sales area 1000/10/00',
+      ],
+      [
+        'a Sold-to that is not assigned to the sales area',
+        { ...POLAND, currency: 'PLN' },
+        'soldToCustomerNumber ACC is not assigned to sales area 2000/10/00',
+      ],
+      [
+        'a sales area that is not configured',
+        { distributionChannel: '20' },
+        'salesArea 1000/20/00 does not exist',
+      ],
+      [
+        'ZP01 for a Sold-to (configured for the sales area only)',
+        { conditionTypeCode: 'ZP01' },
+        'conditionTypeCode ZP01 (List Price) cannot be used with scope SOLD_TO; allowed scopes: SALES_AREA',
       ],
       [
         'an unknown Sold-to',
@@ -189,19 +226,18 @@ describe('Price conditions API', () => {
       ['an unknown property', { priceUnit: 100 }],
     ])('answers 400 for %s', async (_case, change) => {
       await create({ ...soldToBody, ...change }).expect(400);
-      await expect(prisma.priceCondition.count()).resolves.toBe(0);
+      await expect(ownCount()).resolves.toBe(0);
     });
   });
 
   describe('GET /price-conditions', () => {
-    it('lists conditions sorted by material, scope, key and start', async () => {
+    it('lists conditions sorted by sales area, material, scope, key and start', async () => {
       await create({ ...soldToBody, validFrom: '2027-01-01', validTo: null });
       await create(soldToBody);
       await create(unitBody);
       await create({
         ...soldToBody,
         materialNumber: 'MAT-2',
-        currency: 'CHF',
         amount: '180.00',
       });
 
@@ -209,13 +245,23 @@ describe('Price conditions API', () => {
 
       expect(
         (
-          body as { materialNumber: string; scope: string; validFrom: string }[]
-        ).map((c) => `${c.materialNumber} ${c.scope} ${c.validFrom}`),
+          body as {
+            salesArea: typeof GERMANY;
+            materialNumber: string;
+            scope: string;
+            validFrom: string;
+          }[]
+        ).map(
+          (c) =>
+            `${c.salesArea.salesOrganization} ${c.materialNumber} ${c.scope} ${c.validFrom}`,
+        ),
       ).toEqual([
-        'MAT-1 B2B_UNIT 2026-01-01',
-        'MAT-1 SOLD_TO 2026-01-01',
-        'MAT-1 SOLD_TO 2027-01-01',
-        'MAT-2 SOLD_TO 2026-01-01',
+        '1000 MAT-1 B2B_UNIT 2026-01-01',
+        '1000 MAT-1 SOLD_TO 2026-01-01',
+        '1000 MAT-1 SOLD_TO 2027-01-01',
+        '1000 MAT-1 SALES_AREA 1900-01-01',
+        '1000 MAT-2 SOLD_TO 2026-01-01',
+        '2000 MAT-2 SALES_AREA 1900-01-01',
       ]);
     });
 
@@ -237,8 +283,7 @@ describe('Price conditions API', () => {
         data: { isActive: false },
       });
 
-      const { body } = await http().get('/price-conditions').expect(200);
-      expect(body).toMatchObject([
+      expect(await ownListed()).toMatchObject([
         { unit: { unitId: 'U1', soldTo: { isActive: false } } },
       ]);
     });
@@ -328,7 +373,8 @@ describe('Price conditions API', () => {
       ['the material', { materialNumber: 'MAT-2' }],
       ['the scope', { scope: 'B2B_UNIT' }],
       ['the Sold-to', { soldToCustomerNumber: 'M1' }],
-      ['the currency', { currency: 'CHF' }],
+      ['the currency', { currency: 'PLN' }],
+      ['the sales organization', { salesOrganization: '2000' }],
     ])('answers 400 for changing %s', async (_case, body) => {
       await patch(id, body).expect(400);
     });
@@ -339,54 +385,40 @@ describe('Price conditions API', () => {
 
     it('has no DELETE endpoint', async () => {
       await http().delete(`/price-conditions/${id}`).expect(404);
-      await expect(prisma.priceCondition.count()).resolves.toBe(1);
+      await expect(ownCount()).resolves.toBe(1);
     });
   });
 
-  describe('material currency changes', () => {
-    it('are blocked while active conditions use the old currency', async () => {
-      const { body } = await create(soldToBody).expect(201);
-      const id = (body as { conditionId: number }).conditionId;
+  // Since Sprint 9C-B price and currency of a material are deprecated: they
+  // are not tied to price conditions and never used for pricing
+  describe('deprecated material price', () => {
+    it('can change freely and does not touch any condition', async () => {
+      await create(soldToBody).expect(201);
+      const before = await prisma.priceCondition.findMany({
+        orderBy: { conditionId: 'asc' },
+      });
 
-      const response = await http()
-        .patch('/materials/MAT-1')
-        .send({ currency: 'CHF' })
-        .expect(422);
-      expect((response.body as { message: string[] }).message).toEqual([
-        'currency cannot be changed to CHF: material MAT-1 has 1 active price condition(s) in another currency',
-      ]);
-
-      // Other changes and the same currency stay possible
       await http()
         .patch('/materials/MAT-1')
-        .send({ price: 4600, currency: 'EUR' })
+        .send({ price: 1, currency: 'CHF' })
         .expect(200);
 
-      // After deactivating the condition, the currency can change ...
-      await http()
-        .patch(`/price-conditions/${id}`)
-        .send({ isActive: false })
-        .expect(200);
-      await http()
-        .patch('/materials/MAT-1')
-        .send({ currency: 'CHF' })
-        .expect(200);
-
-      // ... and the old condition cannot be reactivated in EUR
-      const reactivation = await http()
-        .patch(`/price-conditions/${id}`)
-        .send({ isActive: true })
-        .expect(422);
-      expect((reactivation.body as { message: string[] }).message).toEqual([
-        'currency must be CHF, the currency of material MAT-1',
-      ]);
+      await expect(
+        prisma.priceCondition.findMany({ orderBy: { conditionId: 'asc' } }),
+      ).resolves.toEqual(before);
     });
 
-    it('still answer 404 for an unknown material', async () => {
-      await http()
-        .patch('/materials/NOPE')
-        .send({ currency: 'CHF' })
-        .expect(404);
+    it('is optional for new materials', async () => {
+      const { body } = await http()
+        .post('/materials')
+        .send({ materialNumber: 'MAT-9', description: 'Valve' })
+        .expect(201);
+      expect(body).toEqual({
+        materialNumber: 'MAT-9',
+        description: 'Valve',
+        price: null,
+        currency: null,
+      });
     });
   });
 });

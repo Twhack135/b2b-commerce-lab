@@ -12,6 +12,9 @@ const validate = (body: unknown) =>
   pipe.transform(body, { type: 'body', metatype: SimulateSalesOrderDto });
 
 const valid = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
   unitId: 'UNIT-STUTTGART',
   pricingDate: '2026-11-15',
   items: [
@@ -87,6 +90,12 @@ describe('SimulateSalesOrderDto validation', () => {
 
   it.each([
     ['a missing unit', { unitId: undefined }],
+    ['a missing sales organization', { salesOrganization: undefined }],
+    ['a missing distribution channel', { distributionChannel: undefined }],
+    ['a missing division', { division: undefined }],
+    ['a numeric sales organization', { salesOrganization: 1000 }],
+    ['a malformed division', { division: '0' }],
+    ['a currency chosen by the client', { currency: 'EUR' }],
     ['a missing pricing date', { pricingDate: undefined }],
     ['an impossible pricing date', { pricingDate: '2026-02-30' }],
     ['no items', { items: [] }],

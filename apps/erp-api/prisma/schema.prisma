@@ -15,10 +15,13 @@ datasource db {
 // Table and column names in PostgreSQL use lowercase snake_case,
 // so they can be queried in SQL without quotes
 model Material {
-  materialNumber String  @id @map("material_number")
+  materialNumber String   @id @map("material_number")
   description    String
-  price          Decimal @db.Decimal(12, 2)
-  currency       String  @db.Char(3)
+  // DEPRECATED since Sprint 9C-B: list prices are ZP01 condition records per
+  // sales area. These columns are kept (nullable) until the Backoffice no
+  // longer sends them and are never used for price determination.
+  price          Decimal? @db.Decimal(12, 2)
+  currency       String?  @db.Char(3)
 
   // Relation only; the materials table itself has no new columns
   priceConditions PriceCondition[]
@@ -79,7 +82,11 @@ model SalesOrganization {
 
   currency   Currency    @relation(fields: [currencyCode], references: [code], onDelete: Restrict, onUpdate: Restrict)
   salesAreas SalesArea[]
+  // Price conditions must use the currency of their sales organization
+  priceConditions PriceCondition[]
 
+  // Target of the foreign key that checks the currency of price conditions
+  @@unique([code, currencyCode], map: "sales_organizations_code_currency_key")
   @@index([currencyCode])
   @@map("sales_organizations")
 }
@@ -116,6 +123,7 @@ model SalesArea {
 
   customerAssignments CustomerSalesArea[]
   b2bUnits            B2bUnit[]
+  priceConditions     PriceCondition[]
 
   @@id([salesOrganization, distributionChannel, division])
   @@index([distributionChannel])
@@ -141,6 +149,7 @@ model CustomerSalesArea {
   billToUnits       B2bUnit[]       @relation("UnitBillToSalesArea")
   payerUnits        B2bUnit[]       @relation("UnitPayerSalesArea")
   shipToAssignments B2bUnitShipTo[] @relation("ShipToSalesArea")
+  soldToConditions  PriceCondition[] @relation("PriceConditionSoldToSalesArea")
 
   @@id([customerNumber, salesOrganization, distributionChannel, division])
   @@index([salesOrganization, distributionChannel, division], map: "customer_sales_areas_sales_area_idx")
@@ -202,9 +211,10 @@ model B2bUnit {
   billToSalesArea CustomerSalesArea @relation("UnitBillToSalesArea", fields: [billToCustomerNumber, salesOrganization, distributionChannel, division], references: [customerNumber, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "b2b_units_bill_to_sales_area_fkey")
   payerSalesArea  CustomerSalesArea @relation("UnitPayerSalesArea", fields: [payerCustomerNumber, salesOrganization, distributionChannel, division], references: [customerNumber, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "b2b_units_payer_sales_area_fkey")
 
-  shipTos            B2bUnitShipTo[]  @relation("ShipToUnit")
-  shipTosInSalesArea B2bUnitShipTo[]  @relation("ShipToUnitSalesArea")
-  priceConditions    PriceCondition[]
+  shipTos                    B2bUnitShipTo[]  @relation("ShipToUnit")
+  shipTosInSalesArea         B2bUnitShipTo[]  @relation("ShipToUnitSalesArea")
+  priceConditions            PriceCondition[] @relation("PriceConditionUnit")
+  priceConditionsInSalesArea PriceCondition[] @relation("PriceConditionUnitSalesArea")
 
   @@unique([unitId, accountCustomerNumber])
   // Target of the ship-to foreign key that repeats the sales area
@@ -245,11 +255,13 @@ model B2bUnitShipTo {
   @@map("b2b_unit_ship_tos")
 }
 
-// Level of a price condition. The pricing engine checks the levels in this
-// order and falls back to the material's base price (Material.price).
+// Level of a price condition (comparable to the key of an SAP condition
+// table). The pricing engine checks the levels in this order: B2B unit,
+// Sold-to, then the list price of the sales area.
 enum PriceConditionScope {
   B2B_UNIT
   SOLD_TO
+  SALES_AREA
 
   @@map("price_condition_scope")
 }
@@ -284,8 +296,8 @@ enum CalculationType {
 // administered later. Which combinations of class and calculation type the
 // pricing engine can calculate is decided in the code (currently only
 // PRICE with QUANTITY). Whether a type may be used for condition records is
-// configuration (allowedForConditionRecords), e.g. ZP01 is the material base
-// price for now and cannot be maintained as a condition record.
+// configuration (allowedForConditionRecords), and so are the scopes a type
+// may be used with (ConditionTypeScope).
 model ConditionType {
   code            String          @id @db.VarChar(4)
   name            String          @db.VarChar(60)
@@ -301,18 +313,41 @@ model ConditionType {
   updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   priceConditions PriceCondition[]
+  allowedScopes   ConditionTypeScope[]
 
   @@map("condition_types")
 }
 
-// A customer-specific material price for a period (comparable to an SAP
-// condition record) of a condition type, e.g. ZP02. Exactly one of soldToCustomerNumber and unitId is set,
-// depending on the scope. Database rules written by hand in the migration,
-// because Prisma cannot model them:
-// - CHECK: the key column matching the scope is set, the other one is null
+// Configuration: the scopes a condition type may be used with (comparable to
+// the condition tables of the access sequence of an SAP condition type),
+// e.g. ZP01 List Price only per sales area, ZP02 and ZP03 only per Sold-to or
+// B2B unit. Created by migrations, read-only in the API. Price conditions
+// refer to their pair (foreign key), so a record can never use a type with a
+// scope that is not configured.
+model ConditionTypeScope {
+  conditionTypeCode String              @map("condition_type_code") @db.VarChar(4)
+  scope             PriceConditionScope
+
+  conditionType   ConditionType    @relation(fields: [conditionTypeCode], references: [code], onDelete: Restrict, onUpdate: Restrict)
+  priceConditions PriceCondition[]
+
+  @@id([conditionTypeCode, scope])
+  @@map("condition_type_scopes")
+}
+
+// A material price for a period in one sales area (comparable to an SAP
+// condition record) of a condition type, e.g. ZP01 List Price, ZP02 or ZP03.
+// The scope decides the key: SALES_AREA (list price, no further key),
+// SOLD_TO (soldToCustomerNumber) or B2B_UNIT (unitId).
+// Database rules written by hand in the migration, because Prisma cannot
+// model them:
+// - CHECK: the key column matching the scope is set, the others are null
 // - CHECK: amount > 0, validTo is null (open-ended) or on/after validFrom
-// - EXCLUDE: active conditions with the same material and key must not have
-//   overlapping validity periods (needs the btree_gist extension)
+// - EXCLUDE: active conditions with the same sales area, material and key
+//   must not have overlapping validity periods (needs btree_gist)
+// Foreign keys below keep every condition inside its market: the Sold-to
+// is assigned to the sales area, the unit belongs to it, and the currency
+// is the currency of the sales organization.
 // Conditions are never deleted; they are deactivated via isActive.
 model PriceCondition {
   conditionId          Int                 @id @default(autoincrement()) @map("condition_id")
@@ -327,12 +362,24 @@ model PriceCondition {
   validTo              DateTime?           @map("valid_to") @db.Date
   isActive             Boolean             @default(true) @map("is_active")
   conditionTypeCode    String              @map("condition_type_code") @db.VarChar(4)
+  // The sales area the price is valid in; fixed after creation
+  salesOrganization    String              @map("sales_organization") @db.Char(4)
+  distributionChannel  String              @map("distribution_channel") @db.Char(2)
+  division             String              @db.Char(2)
   createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   material Material  @relation(fields: [materialNumber], references: [materialNumber], onDelete: Restrict, onUpdate: Restrict)
   soldTo   Customer? @relation(fields: [soldToCustomerNumber], references: [customerNumber], onDelete: Restrict, onUpdate: Restrict)
-  unit     B2bUnit?  @relation(fields: [unitId], references: [unitId], onDelete: Restrict, onUpdate: Restrict)
+  unit     B2bUnit?  @relation("PriceConditionUnit", fields: [unitId], references: [unitId], onDelete: Restrict, onUpdate: Restrict)
+
+  // Market consistency (see above)
+  salesArea         SalesArea          @relation(fields: [salesOrganization, distributionChannel, division], references: [salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "price_conditions_sales_area_fkey")
+  soldToSalesArea   CustomerSalesArea? @relation("PriceConditionSoldToSalesArea", fields: [soldToCustomerNumber, salesOrganization, distributionChannel, division], references: [customerNumber, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "price_conditions_sold_to_sales_area_fkey")
+  unitInSalesArea   B2bUnit?           @relation("PriceConditionUnitSalesArea", fields: [unitId, salesOrganization, distributionChannel, division], references: [unitId, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "price_conditions_unit_sales_area_fkey")
+  salesOrgCurrency  SalesOrganization  @relation(fields: [salesOrganization, currency], references: [code, currencyCode], onDelete: Restrict, onUpdate: Restrict, map: "price_conditions_currency_fkey")
+  // The condition type may be used with this scope (configuration)
+  conditionTypeScope ConditionTypeScope @relation(fields: [conditionTypeCode, scope], references: [conditionTypeCode, scope], onDelete: Restrict, onUpdate: Restrict, map: "price_conditions_condition_type_scope_fkey")
   // The overlap rule above deliberately ignores the condition type: there is
   // at most one active price per key and day. Future pricing procedures must
   // combine several condition types at once (list price, discounts, freight,
@@ -343,5 +390,10 @@ model PriceCondition {
   @@index([soldToCustomerNumber])
   @@index([unitId])
   @@index([conditionTypeCode])
+  @@index([salesOrganization, distributionChannel, division, materialNumber], map: "price_conditions_sales_area_material_idx")
+  @@index([soldToCustomerNumber, salesOrganization, distributionChannel, division], map: "price_conditions_sold_to_sales_area_idx")
+  @@index([unitId, salesOrganization, distributionChannel, division], map: "price_conditions_unit_sales_area_idx")
+  @@index([salesOrganization, currency], map: "price_conditions_currency_idx")
+  @@index([conditionTypeCode, scope], map: "price_conditions_condition_type_scope_idx")
   @@map("price_conditions")
 }

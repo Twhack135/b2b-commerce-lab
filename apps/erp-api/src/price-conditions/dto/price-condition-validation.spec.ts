@@ -32,8 +32,15 @@ async function messagesOf(body: unknown, dto: Dto): Promise<string[]> {
   }
 }
 
+const GERMANY = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
+};
+
 const soldToBody = {
   conditionTypeCode: 'ZP02',
+  ...GERMANY,
   materialNumber: 'MAT-001',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'CUST-1000',
@@ -45,6 +52,7 @@ const soldToBody = {
 
 const unitBody = {
   conditionTypeCode: 'ZP02',
+  ...GERMANY,
   materialNumber: 'MAT-001',
   scope: 'B2B_UNIT',
   unitId: 'UNIT-STUTTGART',
@@ -64,6 +72,31 @@ describe('CreatePriceConditionDto validation', () => {
     ['an amount without decimals', { ...soldToBody, amount: '42' }],
     ['an amount with one decimal', { ...soldToBody, amount: '42.5' }],
     ['a one-day period', { ...soldToBody, validTo: '2026-01-01' }],
+    // Sprint 9C-B
+    [
+      'a list price of the sales area without key and currency',
+      {
+        conditionTypeCode: 'ZP01',
+        ...GERMANY,
+        materialNumber: 'MAT-001',
+        scope: 'SALES_AREA',
+        amount: '4500.00',
+        validFrom: '1900-01-01',
+      },
+    ],
+    [
+      'a JPY amount without decimals',
+      {
+        ...soldToBody,
+        salesOrganization: '3000',
+        currency: 'JPY',
+        amount: '700000',
+      },
+    ],
+    [
+      'no currency (taken from the sales area)',
+      { ...soldToBody, currency: undefined },
+    ],
   ])('should accept %s', async (_case, body) => {
     await expect(messagesOf(body, CreatePriceConditionDto)).resolves.toEqual(
       [],
@@ -98,6 +131,32 @@ describe('CreatePriceConditionDto validation', () => {
       'conditionTypeCode must be a string',
     ],
     ['a missing scope', { scope: undefined }, 'scope must be one of'],
+    [
+      'a missing sales organization',
+      { salesOrganization: undefined },
+      'salesOrganization must be 4 capital letters or digits',
+    ],
+    [
+      'a sales organization as number',
+      { salesOrganization: 1000 },
+      'salesOrganization must be a string',
+    ],
+    [
+      'a missing distribution channel',
+      { distributionChannel: undefined },
+      'distributionChannel must be 2 capital letters or digits',
+    ],
+    ['a division with 3 characters', { division: '000' }, 'division must be 2'],
+    [
+      'a list price with a Sold-to',
+      { scope: 'SALES_AREA' },
+      'soldToCustomerNumber is only allowed when scope is SOLD_TO',
+    ],
+    [
+      'a sales area as one field',
+      { salesArea: '1000/10/00' },
+      'property salesArea',
+    ],
     ['an unknown scope', { scope: 'CUSTOMER' }, 'scope must be one of'],
     [
       'a Sold-to condition without customer',
@@ -194,6 +253,9 @@ describe('UpdatePriceConditionDto validation', () => {
     ['changing the unit', { unitId: 'UNIT-MUENCHEN' }],
     ['changing the currency', { currency: 'USD' }],
     ['changing the condition type', { conditionTypeCode: 'ZP03' }],
+    ['changing the sales organization', { salesOrganization: '2000' }],
+    ['changing the distribution channel', { distributionChannel: '10' }],
+    ['changing the division', { division: '00' }],
     ['a null amount', { amount: null }],
     ['a null validFrom', { validFrom: null }],
     ['an invalid validTo', { validTo: '31.12.2026' }],
@@ -209,6 +271,7 @@ describe('CalculatePriceDto validation', () => {
   const body = {
     materialNumber: 'MAT-001',
     unitId: 'UNIT-STUTTGART',
+    ...GERMANY,
     pricingDate: '2026-11-15',
   };
 
@@ -230,6 +293,11 @@ describe('CalculatePriceDto validation', () => {
     ['a quantity above 99999', { quantity: 100000 }],
     ['a quantity as text', { quantity: '2' }],
     ['a Sold-to instead of the unit', { soldToCustomerNumber: 'CUST-1000' }],
+    ['a missing sales organization', { salesOrganization: undefined }],
+    ['a missing distribution channel', { distributionChannel: undefined }],
+    ['a missing division', { division: undefined }],
+    ['a lower-case sales organization', { salesOrganization: 'de01' }],
+    ['a currency chosen by the client', { currency: 'EUR' }],
   ])('should reject %s', async (_case, change) => {
     await expect(
       validate({ ...body, ...change }, CalculatePriceDto),

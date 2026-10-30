@@ -31,7 +31,18 @@ describe('Seed', () => {
     await expect(prisma.customer.count()).resolves.toBe(5);
     await expect(prisma.customerAccountMember.count()).resolves.toBe(3);
     await expect(prisma.b2bUnit.count()).resolves.toBe(2);
-    await expect(prisma.priceCondition.count()).resolves.toBe(3);
+    // Two ZP01 list prices and three customer prices, all in Germany
+    await expect(prisma.priceCondition.count()).resolves.toBe(5);
+    await expect(
+      prisma.priceCondition.count({
+        where: { conditionTypeCode: 'ZP01', scope: 'SALES_AREA' },
+      }),
+    ).resolves.toBe(2);
+    await expect(
+      prisma.priceCondition.count({
+        where: { salesOrganization: { not: '1000' } },
+      }),
+    ).resolves.toBe(0);
 
     const defaults = await prisma.b2bUnitShipTo.groupBy({
       by: ['unitId'],

@@ -2,6 +2,7 @@ import { PartnerSummary } from '../common/partner-summary';
 import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
 import { PricingSource } from '../pricing/price-determination';
 import { PriceResultStep } from '../pricing/price-result.interface';
+import { SalesAreaKey } from '../sales-areas/sales-area-key';
 import { RequestedShippingMethod } from './dto/simulate-sales-order.dto';
 
 export type SimulationStatus = 'VALID' | 'VALID_WITH_WARNINGS' | 'INVALID';
@@ -55,10 +56,10 @@ export interface SimulatedItem {
   currency: string | null;
   pricing: {
     source: PricingSource;
-    /** Added in Sprint 9A: condition type of the used price (ZP01 for the base price) */
+    /** Condition type of the used price, e.g. ZP01 for the list price */
     conditionType: ConditionTypeSummary | null;
-    conditionId: number | null;
-    validFrom: string | null;
+    conditionId: number;
+    validFrom: string;
     validTo: string | null;
     steps: PriceResultStep[];
   } | null;
@@ -85,6 +86,13 @@ export interface ProposedOrderBlock {
 export interface SalesOrderSimulation {
   simulated: true;
   status: SimulationStatus;
+  /** Added in Sprint 9C-B: the requested sales area */
+  salesArea: SalesAreaKey;
+  /**
+   * Added in Sprint 9C-B: document currency, taken from the sales area;
+   * null if the sales area does not exist
+   */
+  currency: string | null;
   /** The order date; prices valid on this date are used */
   pricingDate: string;
   /** As requested by the customer; never a confirmed delivery date */

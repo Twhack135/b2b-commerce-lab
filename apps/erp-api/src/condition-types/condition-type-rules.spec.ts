@@ -2,7 +2,7 @@ import {
   conditionRecordRestriction,
   conditionTypeViolations,
   isSupportedForPriceConditions,
-  LIST_PRICE_CONDITION_TYPE,
+  scopeViolations,
   toConditionTypeSummary,
 } from './condition-type-rules';
 
@@ -117,7 +117,43 @@ describe('condition type rules', () => {
     });
   });
 
-  it('uses ZP01 as the transitional list price type', () => {
-    expect(LIST_PRICE_CONDITION_TYPE).toBe('ZP01');
+  describe('scopeViolations (configured scopes per condition type)', () => {
+    const zp01 = {
+      name: 'List Price',
+      allowedScopes: [{ scope: 'SALES_AREA' as const }],
+    };
+    const zp02 = {
+      name: 'Customer Net Price',
+      allowedScopes: [
+        { scope: 'SOLD_TO' as const },
+        { scope: 'B2B_UNIT' as const },
+      ],
+    };
+
+    it('allows a configured scope', () => {
+      expect(scopeViolations('ZP01', zp01, 'SALES_AREA')).toEqual([]);
+      expect(scopeViolations('ZP02', zp02, 'B2B_UNIT')).toEqual([]);
+    });
+
+    it('rejects a scope that is not configured and names the allowed ones', () => {
+      expect(scopeViolations('ZP01', zp01, 'SOLD_TO')).toEqual([
+        'conditionTypeCode ZP01 (List Price) cannot be used with scope SOLD_TO; allowed scopes: SALES_AREA',
+      ]);
+      expect(scopeViolations('ZP02', zp02, 'SALES_AREA')).toEqual([
+        'conditionTypeCode ZP02 (Customer Net Price) cannot be used with scope SALES_AREA; allowed scopes: SOLD_TO, B2B_UNIT',
+      ]);
+    });
+
+    it('rejects every scope of a type without configured scopes', () => {
+      expect(
+        scopeViolations(
+          'ZT01',
+          { name: 'Tax', allowedScopes: [] },
+          'SALES_AREA',
+        ),
+      ).toEqual([
+        'conditionTypeCode ZT01 (Tax) cannot be used with scope SALES_AREA: no scope is configured for it',
+      ]);
+    });
   });
 });

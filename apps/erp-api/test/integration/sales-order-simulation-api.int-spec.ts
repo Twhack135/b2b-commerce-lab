@@ -5,6 +5,10 @@ import {
   createTestApp,
   resetDatabase,
   tableFingerprint,
+  createListPrices,
+  GERMANY,
+  LIST_PRICE_ID,
+  POLAND,
 } from './helpers';
 
 type Message = { severity: string; code: string; text: string; field?: string };
@@ -41,6 +45,7 @@ type Simulation = {
 
 // The example order of Müller Heiztechnik, Stuttgart branch
 const muellerOrder = {
+  ...GERMANY,
   unitId: 'UNIT-STUTTGART',
   pricingDate: '2026-11-15',
   customerReference: 'PO-STR-2026-118',
@@ -100,7 +105,7 @@ describe('Sales order simulation API', () => {
           i.pricing?.source,
         ]),
       ).toEqual([
-        [10, 'MAT-001', 2, '4500.00', '9000.00', 'BASE_PRICE'],
+        [10, 'MAT-001', 2, '4500.00', '9000.00', 'SALES_AREA'],
         [20, 'MAT-002', 10, '189.50', '1895.00', 'SOLD_TO'],
       ]);
       expect(result.totals).toEqual({
@@ -109,6 +114,8 @@ describe('Sales order simulation API', () => {
         includes: 'NET_EXCL_TAX_AND_FREIGHT',
       });
       expect(result).toMatchObject({
+        salesArea: GERMANY,
+        currency: 'EUR',
         customerReference: 'PO-STR-2026-118',
         customerNote: null,
         requestedShippingMethod: 'STANDARD',
@@ -136,7 +143,7 @@ describe('Sales order simulation API', () => {
       ]);
       expect(
         result.checks.filter((c) => c.result === 'PASSED').map((c) => c.check),
-      ).toEqual(['PARTNERS', 'MATERIALS', 'PRICING', 'CURRENCY']);
+      ).toEqual(['SALES_AREA', 'PARTNERS', 'MATERIALS', 'PRICING', 'CURRENCY']);
     });
 
     it('uses another allowed Ship-to of the unit', async () => {
@@ -170,7 +177,7 @@ describe('Sales order simulation API', () => {
       expect(muenchen.items[0].pricing?.source).toBe('B2B_UNIT');
       expect(
         muenchen.items[0].pricing?.steps.map((s) => `${s.source}:${s.applied}`),
-      ).toEqual(['B2B_UNIT:true', 'SOLD_TO:false', 'BASE_PRICE:false']);
+      ).toEqual(['B2B_UNIT:true', 'SOLD_TO:false', 'SALES_AREA:false']);
       expect(stuttgart.items[0]).toMatchObject({
         unitPrice: '189.50',
         netValue: '1895.00',
@@ -194,7 +201,7 @@ describe('Sales order simulation API', () => {
         results.map(
           (r) => `${r.items[0].pricing?.source} ${r.items[0].unitPrice}`,
         ),
-      ).toEqual(['BASE_PRICE 199.00', 'SOLD_TO 189.50', 'B2B_UNIT 179.00']);
+      ).toEqual(['SALES_AREA 199.00', 'SOLD_TO 189.50', 'B2B_UNIT 179.00']);
     });
   });
 
@@ -320,7 +327,7 @@ describe('Sales order simulation API', () => {
         '1895.00',
       ]);
       expect(result.totals).toBeNull();
-      expect(result.checks[0]).toEqual({ check: 'PARTNERS', result: 'FAILED' });
+      expect(result.checks[1]).toEqual({ check: 'PARTNERS', result: 'FAILED' });
     });
 
     it('rejects an inactive Bill-to with its role', async () => {
@@ -434,22 +441,101 @@ describe('Sales order simulation API', () => {
       expect(result.totals).toBeNull();
     });
 
-    it('rejects mixed currencies', async () => {
+    it('reports a material without a German price, never using its Polish price', async () => {
+      // MAT-PL only has a list price in sales area 2000/10/00 (PLN)
       const result = await simulate({
         ...muellerOrder,
         items: [
           { materialNumber: 'MAT-001', quantity: 2 },
-          { materialNumber: 'MAT-CH', quantity: 4 },
+          { materialNumber: 'MAT-PL', quantity: 4 },
         ],
       });
 
       expect(result.status).toBe('INVALID');
-      expect(codes(result.messages)).toEqual(['MIXED_CURRENCIES']);
+      expect(result.messages).toEqual([]);
       expect(result.items.map((i) => `${i.netValue} ${i.currency}`)).toEqual([
         '9000.00 EUR',
-        '100.00 CHF',
+        'null null',
+      ]);
+      expect(result.items[1].messages).toEqual([
+        {
+          severity: 'ERROR',
+          code: 'NO_PRICE_FOUND',
+          text: 'No price found for material MAT-PL in sales area 1000/10/00 on 2026-11-15.',
+          field: 'materialNumber',
+        },
       ]);
       expect(result.totals).toBeNull();
+    });
+  });
+
+  describe('sales area', () => {
+    it('never prices a German unit in another sales area', async () => {
+      const result = await simulate({ ...muellerOrder, ...POLAND });
+
+      expect(result).toMatchObject({
+        status: 'INVALID',
+        salesArea: POLAND,
+        currency: 'PLN',
+        totals: null,
+      });
+      expect(result.messages).toEqual([
+        {
+          severity: 'ERROR',
+          code: 'UNIT_NOT_IN_SALES_AREA',
+          text: 'B2B unit UNIT-STUTTGART belongs to sales area 1000/10/00, not 2000/10/00.',
+          field: 'unitId',
+        },
+      ]);
+      expect(result.items.map((i) => [i.unitPrice, i.pricing])).toEqual([
+        [null, null],
+        [null, null],
+      ]);
+      expect(result.checks[0]).toEqual({
+        check: 'SALES_AREA',
+        result: 'FAILED',
+      });
+    });
+
+    it('reports a sales area that is not configured', async () => {
+      const result = await simulate({
+        ...muellerOrder,
+        distributionChannel: '20',
+      });
+
+      expect(result).toMatchObject({ status: 'INVALID', currency: null });
+      expect(codes(result.messages)).toEqual(['SALES_AREA_NOT_FOUND']);
+      expect(result.items.every((i) => i.unitPrice === null)).toBe(true);
+    });
+
+    it('reports an inactive sales area', async () => {
+      await prisma.salesArea.update({
+        where: { salesOrganization_distributionChannel_division: GERMANY },
+        data: { isActive: false },
+      });
+      try {
+        const result = await simulate(muellerOrder);
+        expect(result.status).toBe('INVALID');
+        expect(codes(result.messages)).toEqual(['SALES_AREA_INACTIVE']);
+      } finally {
+        // Configuration is not reset between tests
+        await prisma.salesArea.update({
+          where: { salesOrganization_distributionChannel_division: GERMANY },
+          data: { isActive: true },
+        });
+      }
+    });
+
+    it('never uses the deprecated material price', async () => {
+      await prisma.material.update({
+        where: { materialNumber: 'MAT-001' },
+        data: { price: '1.00', currency: 'EUR' },
+      });
+
+      const result = await simulate(muellerOrder);
+
+      expect(result.items[0]).toMatchObject({ unitPrice: '4500.00' });
+      expect(result.totals?.netValue).toBe('10895.00');
     });
   });
 
@@ -459,10 +545,18 @@ describe('Sales order simulation API', () => {
         data: Array.from({ length: 200 }, (_, i) => ({
           materialNumber: `SMALL-${i}`,
           description: 'Washer',
-          price: '0.10',
-          currency: 'EUR',
         })),
       });
+      await createListPrices(
+        prisma,
+        GERMANY,
+        'EUR',
+        Array.from({ length: 200 }, (_, i): [string, string] => [
+          `SMALL-${i}`,
+          '0.10',
+        ]),
+        LIST_PRICE_ID + 100,
+      );
 
       const result = await simulate({
         ...muellerOrder,
@@ -478,9 +572,9 @@ describe('Sales order simulation API', () => {
     });
 
     it('calculates the largest values exactly', async () => {
-      await prisma.material.update({
-        where: { materialNumber: 'MAT-001' },
-        data: { price: '9999999999.99' },
+      await prisma.priceCondition.update({
+        where: { conditionId: LIST_PRICE_ID },
+        data: { amount: '9999999999.99' },
       });
 
       const result = await simulate({
@@ -510,6 +604,9 @@ describe('Sales order simulation API', () => {
       ],
       ['quantity 0', { items: [{ materialNumber: 'MAT-001', quantity: 0 }] }],
       ['a missing pricing date', { pricingDate: undefined }],
+      ['a missing sales organization', { salesOrganization: undefined }],
+      ['a malformed distribution channel', { distributionChannel: '1' }],
+      ['a currency chosen by the client', { currency: 'EUR' }],
       ['an unknown shipping method', { requestedShippingMethod: 'DRONE' }],
       [
         'a customer reference of 36 characters',

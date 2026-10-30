@@ -3,7 +3,13 @@
 // responses. Prices and their precedence must not change.
 import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { createMuellerData, createTestApp, resetDatabase } from './helpers';
+import {
+  createMuellerData,
+  createTestApp,
+  GERMANY,
+  LIST_PRICE_ID,
+  resetDatabase,
+} from './helpers';
 
 type Summary = {
   code: string;
@@ -57,7 +63,7 @@ describe('Condition types', () => {
       data: { isActive: true, allowedForConditionRecords: false },
     });
     await prisma.conditionType.updateMany({
-      where: { code: { in: ['ZP02', 'ZP03'] } },
+      where: { code: { in: ['ZP01', 'ZP02', 'ZP03'] } },
       data: { allowedForConditionRecords: true },
     });
   });
@@ -67,6 +73,7 @@ describe('Condition types', () => {
       .post('/price-conditions')
       .send({
         conditionTypeCode: 'ZP03',
+        ...GERMANY,
         materialNumber: 'MAT-001',
         scope: 'SOLD_TO',
         soldToCustomerNumber: 'CUST-1000',
@@ -84,17 +91,20 @@ describe('Condition types', () => {
         allowedForConditionRecords: boolean,
         restriction: string | null,
         sortOrder: number,
+        allowedScopes: string[] = [],
       ) => ({
         isActive: true,
         sortOrder,
         allowedForConditionRecords,
         usableForPriceConditions: restriction === null,
         restriction,
+        allowedScopes,
       });
+      const customerScopes = ['B2B_UNIT', 'SOLD_TO'];
       expect(body).toEqual([
-        { ...ZP01, ...config(false, 'NOT_ALLOWED_FOR_CONDITION_RECORDS', 10) },
-        { ...ZP02, ...config(true, null, 20) },
-        { ...ZP03, ...config(true, null, 30) },
+        { ...ZP01, ...config(true, null, 10, ['SALES_AREA']) },
+        { ...ZP02, ...config(true, null, 20, customerScopes) },
+        { ...ZP03, ...config(true, null, 30, customerScopes) },
         {
           code: 'ZD01',
           name: 'Customer Discount',
@@ -157,19 +167,29 @@ describe('Condition types', () => {
     it('rejects a condition record with an unknown condition type', async () => {
       await expect(
         codeOf(prisma.$executeRaw`
-          INSERT INTO price_conditions (condition_type_code, material_number, scope,
+          INSERT INTO price_conditions (condition_type_code, sales_organization,
+            distribution_channel, division, material_number, scope,
             sold_to_customer_number, amount, currency, valid_from, updated_at)
-          VALUES ('ZZ99', 'MAT-001', 'SOLD_TO', 'CUST-1000', 1, 'EUR', '2026-01-01', now())`),
+          VALUES ('ZZ99', '1000', '10', '00', 'MAT-001', 'SOLD_TO', 'CUST-1000', 1, 'EUR', '2026-01-01', now())`),
       ).resolves.toBe('23503');
     });
 
     it('rejects a condition record without a condition type', async () => {
       await expect(
         codeOf(prisma.$executeRaw`
-          INSERT INTO price_conditions (material_number, scope,
+          INSERT INTO price_conditions (sales_organization, distribution_channel,
+            division, material_number, scope,
             sold_to_customer_number, amount, currency, valid_from, updated_at)
-          VALUES ('MAT-001', 'SOLD_TO', 'CUST-1000', 1, 'EUR', '2026-01-01', now())`),
+          VALUES ('1000', '10', '00', 'MAT-001', 'SOLD_TO', 'CUST-1000', 1, 'EUR', '2026-01-01', now())`),
       ).resolves.toBe('23502');
+    });
+
+    it('prevents removing a configured scope that records use', async () => {
+      await expect(
+        codeOf(
+          prisma.$executeRaw`DELETE FROM condition_type_scopes WHERE condition_type_code = 'ZP01'`,
+        ),
+      ).resolves.toBe('23001');
     });
 
     it('prevents deleting a condition type that is in use', async () => {
@@ -200,39 +220,66 @@ describe('Condition types', () => {
       });
     });
 
-    it('shows the backfilled type of existing records', async () => {
+    it('shows the condition types of existing records', async () => {
       const { body } = await http().get('/price-conditions').expect(200);
 
       expect(
-        (body as { conditionType: Summary; amount: string }[]).map(
-          (c) => `${c.conditionType.code} ${c.amount}`,
-        ),
-      ).toEqual(['ZP02 179.00', 'ZP02 189.50']);
+        (
+          body as {
+            conditionId: number;
+            conditionType: Summary;
+            amount: string;
+          }[]
+        ).map((c) => `${c.conditionId} ${c.conditionType.code} ${c.amount}`),
+      ).toEqual([
+        `${LIST_PRICE_ID} ZP01 4500.00`,
+        '2 ZP02 179.00',
+        '1 ZP02 189.50',
+        `${LIST_PRICE_ID + 1} ZP01 199.00`,
+        `${LIST_PRICE_ID + 2} ZP01 99.00`,
+      ]);
     });
 
     it('requires a condition type for new records', async () => {
       await condition({ conditionTypeCode: undefined }).expect(400);
     });
 
-    it('rejects ZP01, which is not allowed for condition records, with 422', async () => {
+    it('rejects ZP01 for a Sold-to, because it is configured for the sales area only', async () => {
       const response = await condition({ conditionTypeCode: 'ZP01' }).expect(
         422,
       );
 
       expect((response.body as { message: string[] }).message).toEqual([
-        'conditionTypeCode ZP01 (List Price) is not allowed for condition records by its configuration',
+        'conditionTypeCode ZP01 (List Price) cannot be used with scope SOLD_TO; allowed scopes: SALES_AREA',
       ]);
     });
 
     it('follows the configuration, not a fixed rule in the code', async () => {
-      // Allowing ZP01 in the configuration makes it usable at once ...
-      await prisma.conditionType.update({
-        where: { code: 'ZP01' },
-        data: { allowedForConditionRecords: true },
+      // Allowing ZP03 for the sales area makes it usable as list price ...
+      await prisma.conditionTypeScope.create({
+        data: { conditionTypeCode: 'ZP03', scope: 'SALES_AREA' },
       });
-      await condition({ conditionTypeCode: 'ZP01' }).expect(201);
+      try {
+        await condition({
+          scope: 'SALES_AREA',
+          soldToCustomerNumber: undefined,
+          materialNumber: 'MAT-PL',
+        }).expect(201);
+      } finally {
+        await prisma.priceCondition.deleteMany({
+          where: { conditionTypeCode: 'ZP03', scope: 'SALES_AREA' },
+        });
+        await prisma.conditionTypeScope.delete({
+          where: {
+            conditionTypeCode_scope: {
+              conditionTypeCode: 'ZP03',
+              scope: 'SALES_AREA',
+            },
+          },
+        });
+      }
 
-      // ... and disallowing ZP03 blocks it
+      // ... and disallowing ZP03 for records blocks it
       await prisma.conditionType.update({
         where: { code: 'ZP03' },
         data: { allowedForConditionRecords: false },
@@ -332,6 +379,7 @@ describe('Condition types', () => {
         .send({
           materialNumber: 'MAT-002',
           unitId: 'UNIT-MUENCHEN',
+          ...GERMANY,
           pricingDate: '2026-11-15',
         })
         .expect(200);
@@ -349,23 +397,25 @@ describe('Condition types', () => {
       });
       expect(
         result.steps.map((s) => `${s.source}:${s.conditionType?.code ?? '-'}`),
-      ).toEqual(['B2B_UNIT:ZP02', 'SOLD_TO:ZP02', 'BASE_PRICE:ZP01']);
+      ).toEqual(['B2B_UNIT:ZP02', 'SOLD_TO:ZP02', 'SALES_AREA:ZP01']);
     });
 
-    it('shows ZP01 for the material base price', async () => {
+    it('shows ZP01 for the list price of the sales area', async () => {
       const { body } = await http()
         .post('/pricing/price')
         .send({
           materialNumber: 'MAT-001',
           unitId: 'UNIT-STUTTGART',
+          ...GERMANY,
           pricingDate: '2026-11-15',
         })
         .expect(200);
 
       expect(body).toMatchObject({
         unitPrice: '4500.00',
-        source: 'BASE_PRICE',
+        source: 'SALES_AREA',
         conditionType: ZP01,
+        conditionId: LIST_PRICE_ID,
       });
     });
 
@@ -386,6 +436,7 @@ describe('Condition types', () => {
         .send({
           materialNumber: 'MAT-002',
           unitId: 'UNIT-MUENCHEN',
+          ...GERMANY,
           pricingDate: '2026-11-15',
         })
         .expect(200);
@@ -401,6 +452,7 @@ describe('Condition types', () => {
       const { body } = await http()
         .post('/sales-orders/simulate')
         .send({
+          ...GERMANY,
           unitId: 'UNIT-STUTTGART',
           pricingDate: '2026-11-15',
           items: [

@@ -18,6 +18,10 @@ import {
 } from '../../b2b-units/dto/b2b-unit-validators';
 import { IsBusinessKey, IsCalendarDate } from '../../common/validators';
 import { MAX_QUANTITY } from '../../pricing/dto/calculate-price.dto';
+import {
+  IsSalesAreaPartCode,
+  IsSalesOrganizationCode,
+} from '../../sales-areas/sales-area-validators';
 
 /** Technical protection limit, not a business rule */
 export const MAX_ITEMS = 200;
@@ -48,6 +52,18 @@ export class SimulationItemDto {
 // Sold-to, Bill-to and Payer are intentionally not listed: they always come
 // from the B2B unit, and the ValidationPipe rejects unknown properties.
 export class SimulateSalesOrderDto {
+  // Required: the order is simulated in this sales area (the shop context).
+  // The server checks it and takes the document currency from it; the unit
+  // must belong to it.
+  @IsSalesOrganizationCode()
+  salesOrganization: string;
+
+  @IsSalesAreaPartCode()
+  distributionChannel: string;
+
+  @IsSalesAreaPartCode()
+  division: string;
+
   @IsString()
   @IsBusinessKey()
   @MaxLength(UNIT_ID_MAX_LENGTH)

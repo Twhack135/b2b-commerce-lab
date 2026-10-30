@@ -50,27 +50,53 @@ export async function resetDatabase(prisma: PrismaService) {
 }
 
 /**
- * Pricing test data: materials MAT-1 (EUR) and MAT-2 (CHF); account ACC with
- * member M1 and the inactive member OLD; units U1 (Sold-to ACC), U-OFF
+ * List prices (ZP01) of the test data get fixed IDs from this number on,
+ * far above the IDs the sequence hands out, so conditions created by a test
+ * are still numbered 1, 2, 3, ...
+ */
+export const LIST_PRICE_ID = 9001;
+
+/**
+ * ZP01 list prices of materials in a sales area, valid from 1900-01-01 and
+ * open-ended, like the list prices created by the Sprint 9C-B migration.
+ */
+export async function createListPrices(
+  prisma: PrismaService,
+  salesArea: typeof GERMANY,
+  currency: string,
+  prices: [materialNumber: string, amount: string][],
+  firstId = LIST_PRICE_ID,
+) {
+  await prisma.priceCondition.createMany({
+    data: prices.map(([materialNumber, amount], index) => ({
+      conditionId: firstId + index,
+      conditionTypeCode: 'ZP01',
+      ...salesArea,
+      materialNumber,
+      scope: 'SALES_AREA' as const,
+      amount,
+      currency,
+      validFrom: new Date('1900-01-01T00:00:00Z'),
+    })),
+  });
+}
+
+/**
+ * Pricing test data: material MAT-1 with the German list price 4500.00 EUR
+ * (ZP01, condition 9001) and MAT-2 with a list price only in Poland
+ * (799.00 PLN, condition 9002), so it has no price in Germany; account ACC
+ * with member M1 and the inactive member OLD; units U1 (Sold-to ACC), U-OFF
  * (inactive) and U-OLD (Sold-to OLD); the customer LONE has no account.
  */
 export async function createPricingData(prisma: PrismaService) {
   await prisma.material.createMany({
     data: [
-      {
-        materialNumber: 'MAT-1',
-        description: 'Heat Pump',
-        price: '4500.00',
-        currency: 'EUR',
-      },
-      {
-        materialNumber: 'MAT-2',
-        description: 'Thermostat',
-        price: '199.00',
-        currency: 'CHF',
-      },
+      { materialNumber: 'MAT-1', description: 'Heat Pump' },
+      { materialNumber: 'MAT-2', description: 'Thermostat' },
     ],
   });
+  await createListPrices(prisma, GERMANY, 'EUR', [['MAT-1', '4500.00']]);
+  await createListPrices(prisma, POLAND, 'PLN', [['MAT-2', '799.00']], 9002);
   await createCustomers(prisma, ['ACC', 'M1', 'OLD', 'LONE']);
   await prisma.customerAccountMember.createMany({
     data: ['ACC', 'M1', 'OLD'].map((c) => membership(c, 'ACC')),
@@ -152,33 +178,25 @@ export function membership(
  * Data shaped like the development data: account CUST-1000 (Müller
  * Heiztechnik GmbH, Sold-to, Bill-to and Payer) with warehouses CUST-1100
  * (Stuttgart) and CUST-1200 (München); units UNIT-STUTTGART (default Ship-to
- * CUST-1100) and UNIT-MUENCHEN (default Ship-to CUST-1200); prices for
- * MAT-002: Sold-to CUST-1000 189.50, unit UNIT-MUENCHEN 179.00 from
- * 2026-06-15. CUST-2000 is a customer of no account.
+ * CUST-1100) and UNIT-MUENCHEN (default Ship-to CUST-1200), all in the German
+ * sales area; list prices (ZP01) MAT-001 4500.00 and MAT-002 199.00 EUR
+ * (conditions 9001 and 9002); prices for MAT-002: Sold-to CUST-1000 189.50,
+ * unit UNIT-MUENCHEN 179.00 from 2026-06-15. MAT-PL only has a Polish list
+ * price, so it has no price in Germany. CUST-2000 is a customer of no account.
  */
 export async function createMuellerData(prisma: PrismaService) {
   await prisma.material.createMany({
     data: [
-      {
-        materialNumber: 'MAT-001',
-        description: 'Heat Pump',
-        price: '4500.00',
-        currency: 'EUR',
-      },
-      {
-        materialNumber: 'MAT-002',
-        description: 'Thermostat',
-        price: '199.00',
-        currency: 'EUR',
-      },
-      {
-        materialNumber: 'MAT-CH',
-        description: 'Swiss Valve',
-        price: '25.00',
-        currency: 'CHF',
-      },
+      { materialNumber: 'MAT-001', description: 'Heat Pump' },
+      { materialNumber: 'MAT-002', description: 'Thermostat' },
+      { materialNumber: 'MAT-PL', description: 'Polish Valve' },
     ],
   });
+  await createListPrices(prisma, GERMANY, 'EUR', [
+    ['MAT-001', '4500.00'],
+    ['MAT-002', '199.00'],
+  ]);
+  await createListPrices(prisma, POLAND, 'PLN', [['MAT-PL', '99.00']], 9003);
   await createCustomers(prisma, [
     'CUST-1000',
     'CUST-1100',
@@ -226,6 +244,7 @@ export async function createMuellerData(prisma: PrismaService) {
     data: [
       {
         conditionTypeCode: 'ZP02',
+        ...GERMANY,
         materialNumber: 'MAT-002',
         scope: 'SOLD_TO',
         soldToCustomerNumber: 'CUST-1000',
@@ -235,6 +254,7 @@ export async function createMuellerData(prisma: PrismaService) {
       },
       {
         conditionTypeCode: 'ZP02',
+        ...GERMANY,
         materialNumber: 'MAT-002',
         scope: 'B2B_UNIT',
         unitId: 'UNIT-MUENCHEN',

@@ -14,12 +14,17 @@ import {
 import { CUSTOMER_NUMBER_MAX_LENGTH } from '../../customers/dto/customer-validators';
 import { PriceConditionScope } from '../../generated/prisma/enums';
 import { IsCurrencyCode } from '../../materials/dto/material-validators';
+import {
+  IsSalesAreaPartCode,
+  IsSalesOrganizationCode,
+} from '../../sales-areas/sales-area-validators';
 import { IsAmount, IsScopeKey } from './price-condition-validators';
 
 export class CreatePriceConditionDto {
-  // Condition type, material, scope and key (Sold-to or unit) are fixed after
+  // Condition type, sales area, material, scope and key are fixed after
   // creation. Required: every condition record has a condition type, e.g.
-  // ZP02. Which types can be used is checked against the configuration.
+  // ZP01 or ZP02. Which types can be used, and with which scopes, is
+  // checked against the configuration.
   @IsString()
   @Matches(/^[A-Z0-9]{4}$/, {
     message:
@@ -27,12 +32,22 @@ export class CreatePriceConditionDto {
   })
   conditionTypeCode: string;
 
+  // Required: every price belongs to one sales area (market)
+  @IsSalesOrganizationCode()
+  salesOrganization: string;
+
+  @IsSalesAreaPartCode()
+  distributionChannel: string;
+
+  @IsSalesAreaPartCode()
+  division: string;
+
   @IsString()
   @IsBusinessKey()
   materialNumber: string;
 
   @IsEnum(PriceConditionScope, {
-    message: 'scope must be one of: B2B_UNIT, SOLD_TO',
+    message: 'scope must be one of: B2B_UNIT, SOLD_TO, SALES_AREA',
   })
   scope: PriceConditionScope;
 
@@ -45,10 +60,12 @@ export class CreatePriceConditionDto {
   @IsAmount()
   amount: string;
 
-  // Must be the currency of the material; it is sent anyway, so a client
-  // never stores a price in a currency it did not expect
+  // Optional: the server takes the currency of the sales area. If a client
+  // sends it, it must be that currency, so a client never stores a price
+  // in a currency it did not expect.
+  @IfPresent()
   @IsCurrencyCode()
-  currency: string;
+  currency?: string;
 
   @IsCalendarDate()
   validFrom: string;

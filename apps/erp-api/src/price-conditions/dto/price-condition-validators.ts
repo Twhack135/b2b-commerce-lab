@@ -15,7 +15,8 @@ const AMOUNT_PATTERN = /^(0|[1-9]\d{0,9})(\.\d{1,2})?$/;
 
 /**
  * An amount is a decimal string such as "4200.50", greater than 0, with at
- * most two decimal places. It is text instead of a JSON number, so it is
+ * most two decimal places (the column limit). Fewer decimal places, e.g.
+ * none for JPY, are checked by the service against the currency. It is text instead of a JSON number, so it is
  * never changed by floating-point conversion. Values like "1.999" are
  * rejected instead of silently rounded.
  */

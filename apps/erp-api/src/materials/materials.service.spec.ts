@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -184,52 +180,49 @@ describe('MaterialsService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('should not check price conditions when the currency is not changed', async () => {
-      prismaMock.material.update.mockResolvedValue(heatPumpRecord);
+    // Since Sprint 9C-B price and currency are deprecated: they are no
+    // longer tied to price conditions, so no condition is checked or locked
+    it.each([
+      ['the price', { price: 4500 }],
+      ['the currency', { currency: 'CHF' }],
+    ])(
+      'should change %s without checking price conditions',
+      async (_c, dto) => {
+        prismaMock.material.update.mockResolvedValue(heatPumpRecord);
 
-      await service.update('MAT-001', { price: 4500 });
+        await service.update('MAT-001', dto);
 
-      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
-      expect(prismaMock.priceCondition.count).not.toHaveBeenCalled();
-    });
+        expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+        expect(prismaMock.priceCondition.count).not.toHaveBeenCalled();
+      },
+    );
+  });
 
-    it('should change the currency when no active condition uses another one', async () => {
-      prismaMock.priceCondition.count.mockResolvedValue(0);
-      prismaMock.material.update.mockResolvedValue({
-        ...heatPumpRecord,
-        currency: 'CHF',
+  describe('deprecated price', () => {
+    it('should create a material without price and currency', async () => {
+      prismaMock.material.create.mockResolvedValue({
+        materialNumber: 'MAT-004',
+        description: 'Valve',
+        price: null,
+        currency: null,
       });
 
       await expect(
-        service.update('MAT-001', { currency: 'CHF' }),
-      ).resolves.toMatchObject({ currency: 'CHF' });
-      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
-      expect(prismaMock.priceCondition.count).toHaveBeenCalledWith({
-        where: {
-          materialNumber: 'MAT-001',
-          isActive: true,
-          currency: { not: 'CHF' },
+        service.create({ materialNumber: 'MAT-004', description: 'Valve' }),
+      ).resolves.toEqual({
+        materialNumber: 'MAT-004',
+        description: 'Valve',
+        price: null,
+        currency: null,
+      });
+      expect(prismaMock.material.create).toHaveBeenCalledWith({
+        data: {
+          materialNumber: 'MAT-004',
+          description: 'Valve',
+          price: null,
+          currency: null,
         },
       });
-    });
-
-    it('should reject a currency change while active conditions use another currency', async () => {
-      prismaMock.priceCondition.count.mockResolvedValue(2);
-
-      const error = await service
-        .update('MAT-001', { currency: 'CHF' })
-        .catch((e: unknown) => e);
-
-      expect(error).toBeInstanceOf(UnprocessableEntityException);
-      expect(
-        (error as UnprocessableEntityException).getResponse(),
-      ).toMatchObject({
-        statusCode: 422,
-        message: [
-          'currency cannot be changed to CHF: material MAT-001 has 2 active price condition(s) in another currency',
-        ],
-      });
-      expect(prismaMock.material.update).not.toHaveBeenCalled();
     });
   });
 

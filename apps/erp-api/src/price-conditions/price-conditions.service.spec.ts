@@ -11,15 +11,77 @@ import { PriceConditionsService } from './price-conditions.service';
 
 const date = (text: string) => new Date(`${text}T00:00:00.000Z`);
 
+const GERMANY = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
+};
+const POLAND = { ...GERMANY, salesOrganization: '2000' };
+const JAPAN = { ...GERMANY, salesOrganization: '3000' };
+const area = (key: typeof GERMANY) =>
+  `${key.salesOrganization}/${key.distributionChannel}/${key.division}`;
+
+// Configured like the migration; 9000 belongs to an inactive organization
+const SALES_AREAS = [
+  { key: GERMANY, currency: { code: 'EUR', decimals: 2 }, isActive: true },
+  { key: POLAND, currency: { code: 'PLN', decimals: 2 }, isActive: true },
+  { key: JAPAN, currency: { code: 'JPY', decimals: 0 }, isActive: true },
+  {
+    key: { ...GERMANY, salesOrganization: '9000' },
+    currency: { code: 'EUR', decimals: 2 },
+    isActive: false,
+  },
+];
+const currencyOf = (key: typeof GERMANY) =>
+  SALES_AREAS.find((a) => area(a.key) === area(key))!.currency;
+
 const CUSTOMERS = [
   { customerNumber: 'CUST-1000', name: 'Müller Heiztechnik', isActive: true },
   { customerNumber: 'OLD', name: 'Inactive Customer', isActive: false },
+  { customerNumber: 'NOAREA', name: 'Not In Germany', isActive: true },
+  { customerNumber: 'PAUSED', name: 'Paused In Germany', isActive: true },
 ];
 
+/** Sales area assignments; NOAREA has none, PAUSED is inactive in Germany */
+const ASSIGNMENTS: Record<string, { area: string; isActive: boolean }[]> = {
+  'CUST-1000': [
+    { area: '1000/10/00', isActive: true },
+    { area: '3000/10/00', isActive: true },
+  ],
+  OLD: [{ area: '1000/10/00', isActive: true }],
+  NOAREA: [],
+  PAUSED: [{ area: '1000/10/00', isActive: false }],
+};
+
 const UNITS = [
-  { unitId: 'UNIT-S', name: 'Stuttgart', isActive: true, soldTo: 'CUST-1000' },
-  { unitId: 'UNIT-OFF', name: 'Closed', isActive: false, soldTo: 'CUST-1000' },
-  { unitId: 'UNIT-OLD', name: 'Old Sold-to', isActive: true, soldTo: 'OLD' },
+  {
+    unitId: 'UNIT-S',
+    name: 'Stuttgart',
+    isActive: true,
+    soldTo: 'CUST-1000',
+    salesArea: GERMANY,
+  },
+  {
+    unitId: 'UNIT-OFF',
+    name: 'Closed',
+    isActive: false,
+    soldTo: 'CUST-1000',
+    salesArea: GERMANY,
+  },
+  {
+    unitId: 'UNIT-OLD',
+    name: 'Old Sold-to',
+    isActive: true,
+    soldTo: 'OLD',
+    salesArea: GERMANY,
+  },
+  {
+    unitId: 'UNIT-JP',
+    name: 'Osaka',
+    isActive: true,
+    soldTo: 'CUST-1000',
+    salesArea: JAPAN,
+  },
 ];
 
 const customer = (n: string) => CUSTOMERS.find((c) => c.customerNumber === n);
@@ -32,6 +94,7 @@ function unitRecord(unitId: string) {
     name: u.name,
     isActive: u.isActive,
     soldToCustomerNumber: u.soldTo,
+    ...u.salesArea,
     soldTo: { customer: customer(u.soldTo) },
   };
 }
@@ -89,12 +152,20 @@ const CONDITION_TYPE_ROWS = [
   },
 ];
 
-// Configuration as in the migration: ZP01 and the not yet calculable types
-// are not allowed for condition records
-const NOT_ALLOWED = ['ZP01', 'ZD01', 'ZF01', 'ZT01'];
+// Configuration as in the migration: the not yet calculable types are not
+// allowed for condition records; ZP01 only per sales area, ZP02 and ZP03
+// only per Sold-to or unit
+const NOT_ALLOWED = ['ZD01', 'ZF01', 'ZT01'];
+const SCOPES: Record<string, string[]> = {
+  ZP01: ['SALES_AREA'],
+  ZP02: ['SOLD_TO', 'B2B_UNIT'],
+  ZP03: ['SOLD_TO', 'B2B_UNIT'],
+  ZOLD: ['SOLD_TO'],
+};
 const CONDITION_TYPES = CONDITION_TYPE_ROWS.map((t) => ({
   ...t,
   allowedForConditionRecords: !NOT_ALLOWED.includes(t.code),
+  allowedScopes: (SCOPES[t.code] ?? []).map((scope) => ({ scope })),
 }));
 
 const ZP02 = {
@@ -109,6 +180,7 @@ function row(changes: Record<string, unknown> = {}) {
   return {
     conditionId: 7,
     conditionTypeCode: 'ZP02',
+    ...GERMANY,
     materialNumber: 'MAT-001',
     scope: 'SOLD_TO',
     soldToCustomerNumber: 'CUST-1000',
@@ -131,12 +203,14 @@ function fullRecord(changes: Record<string, unknown> = {}) {
     material: { materialNumber: r.materialNumber, description: 'Heat Pump' },
     soldTo: r.soldToCustomerNumber ? customer(r.soldToCustomerNumber) : null,
     unit: r.unitId ? unitRecord(r.unitId as string) : null,
+    salesOrgCurrency: { currency: currencyOf(r as unknown as typeof GERMANY) },
   };
 }
 
 // A plain object (not a class instance), so it can be copied with spread
 const soldToCreate = {
   conditionTypeCode: 'ZP02',
+  ...GERMANY,
   materialNumber: 'MAT-001',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'CUST-1000',
@@ -148,12 +222,23 @@ const soldToCreate = {
 
 const unitCreate = {
   conditionTypeCode: 'ZP02',
+  ...GERMANY,
   materialNumber: 'MAT-001',
   scope: 'B2B_UNIT',
   unitId: 'UNIT-S',
   amount: '4100.00',
   currency: 'EUR',
   validFrom: '2026-01-01',
+} satisfies CreatePriceConditionDto;
+
+// List price of the sales area; the currency is optional (taken from it)
+const listPriceCreate = {
+  conditionTypeCode: 'ZP01',
+  ...GERMANY,
+  materialNumber: 'MAT-001',
+  scope: 'SALES_AREA',
+  amount: '4500.00',
+  validFrom: '1900-01-01',
 } satisfies CreatePriceConditionDto;
 
 function prismaError(code: string, meta?: Record<string, unknown>) {
@@ -169,11 +254,12 @@ describe('PriceConditionsService', () => {
 
   const db = {
     $transaction: jest.fn(),
-    // Row lock: SELECT currency FROM materials ... FOR UPDATE
+    // Row lock: SELECT material_number FROM materials ... FOR UPDATE
     $queryRaw: jest.fn(),
     customer: { findUnique: jest.fn() },
     b2bUnit: { findUnique: jest.fn() },
     conditionType: { findUnique: jest.fn() },
+    salesArea: { findUnique: jest.fn() },
     priceCondition: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -189,10 +275,44 @@ describe('PriceConditionsService', () => {
     db.$transaction.mockImplementation((callback: (tx: typeof db) => unknown) =>
       callback(db),
     );
-    db.$queryRaw.mockResolvedValue([{ currency: 'EUR' }]);
+    db.$queryRaw.mockResolvedValue([{ material_number: 'MAT-001' }]);
     db.customer.findUnique.mockImplementation(
-      ({ where }: { where: { customerNumber: string } }) =>
-        customer(where.customerNumber) ?? null,
+      ({
+        where,
+        include,
+      }: {
+        where: { customerNumber: string };
+        include?: { salesAreas: { where: typeof GERMANY } };
+      }) => {
+        const c = customer(where.customerNumber);
+        if (!c) return null;
+        const wanted = include && area(include.salesAreas.where);
+        return {
+          ...c,
+          salesAreas: (ASSIGNMENTS[c.customerNumber] ?? [])
+            .filter((a) => a.area === wanted)
+            .map((a) => ({ isActive: a.isActive })),
+        };
+      },
+    );
+    db.salesArea.findUnique.mockImplementation(
+      ({
+        where,
+      }: {
+        where: {
+          salesOrganization_distributionChannel_division: typeof GERMANY;
+        };
+      }) => {
+        const key = where.salesOrganization_distributionChannel_division;
+        const a = SALES_AREAS.find((x) => area(x.key) === area(key));
+        return a
+          ? {
+              ...a.key,
+              isActive: true,
+              organization: { isActive: a.isActive, currency: a.currency },
+            }
+          : null;
+      },
     );
     db.b2bUnit.findUnique.mockImplementation(
       ({ where }: { where: { unitId: string } }) => unitRecord(where.unitId),
@@ -236,6 +356,7 @@ describe('PriceConditionsService', () => {
         {
           conditionId: 7,
           conditionType: ZP02,
+          salesArea: GERMANY,
           materialNumber: 'MAT-001',
           materialDescription: 'Heat Pump',
           scope: 'SOLD_TO',
@@ -300,6 +421,7 @@ describe('PriceConditionsService', () => {
       expect(db.priceCondition.create).toHaveBeenCalledWith({
         data: {
           conditionTypeCode: 'ZP02',
+          ...GERMANY,
           materialNumber: 'MAT-001',
           scope: 'SOLD_TO',
           soldToCustomerNumber: 'CUST-1000',
@@ -333,6 +455,7 @@ describe('PriceConditionsService', () => {
       expect(db.priceCondition.findFirst).toHaveBeenCalledWith({
         where: {
           materialNumber: 'MAT-001',
+          ...GERMANY,
           scope: 'SOLD_TO',
           soldToCustomerNumber: 'CUST-1000',
           unitId: null,
@@ -388,9 +511,46 @@ describe('PriceConditionsService', () => {
         ['materialNumber NOPE does not exist'],
       ],
       [
-        'another currency than the material',
-        { currency: 'USD' },
-        ['currency must be EUR, the currency of material MAT-001'],
+        'another currency than the sales area',
+        { currency: 'PLN' },
+        ['currency must be EUR, the currency of sales area 1000/10/00'],
+      ],
+      [
+        'a Sold-to that is not assigned to the sales area',
+        { soldToCustomerNumber: 'NOAREA' },
+        [
+          'soldToCustomerNumber NOAREA is not assigned to sales area 1000/10/00',
+        ],
+      ],
+      [
+        'a Sold-to that is inactive in the sales area',
+        { soldToCustomerNumber: 'PAUSED' },
+        ['soldToCustomerNumber PAUSED is inactive in sales area 1000/10/00'],
+      ],
+      [
+        'a Sold-to of another market',
+        { ...POLAND, currency: 'PLN' },
+        [
+          'soldToCustomerNumber CUST-1000 is not assigned to sales area 2000/10/00',
+        ],
+      ],
+      [
+        'a sales area that is not configured',
+        { distributionChannel: '20' },
+        ['salesArea 1000/20/00 does not exist'],
+      ],
+      [
+        'an inactive sales area',
+        { salesOrganization: '9000' },
+        [
+          'salesArea 9000/10/00 is inactive',
+          'soldToCustomerNumber CUST-1000 is not assigned to sales area 9000/10/00',
+        ],
+      ],
+      [
+        'more decimal places than the currency allows (JPY)',
+        { ...JAPAN, amount: '700000.50', currency: undefined },
+        ['amount must be a whole amount: JPY has no decimal places'],
       ],
       [
         'an unknown Sold-to',
@@ -423,9 +583,80 @@ describe('PriceConditionsService', () => {
         'UNIT-OLD',
         ['unitId UNIT-OLD has an inactive Sold-to OLD'],
       ],
+      [
+        'a unit of another sales area',
+        'UNIT-JP',
+        ['unitId UNIT-JP belongs to sales area 3000/10/00, not 1000/10/00'],
+      ],
     ])('should answer 422 for %s', async (_case, unitId, messages) => {
       await expect422(service.create({ ...unitCreate, unitId }), messages);
       expectNoWrites();
+    });
+
+    it('should take the currency from the sales area when none is sent', async () => {
+      const { currency: _currency, ...withoutCurrency } = soldToCreate;
+      await service.create({ ...withoutCurrency, ...JAPAN, amount: '700000' });
+
+      expect(db.priceCondition.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          ...JAPAN,
+          amount: '700000',
+          currency: 'JPY',
+        }) as unknown,
+      });
+    });
+
+    it('should accept a JPY amount with zero decimals written out', async () => {
+      await service.create({
+        ...unitCreate,
+        unitId: 'UNIT-JP',
+        ...JAPAN,
+        currency: 'JPY',
+        amount: '700000.00',
+      });
+
+      expect(db.priceCondition.create).toHaveBeenCalled();
+    });
+
+    it('should create a list price (ZP01) of the sales area without a key', async () => {
+      await service.create(listPriceCreate);
+
+      expect(db.priceCondition.create).toHaveBeenCalledWith({
+        data: {
+          conditionTypeCode: 'ZP01',
+          ...GERMANY,
+          materialNumber: 'MAT-001',
+          scope: 'SALES_AREA',
+          soldToCustomerNumber: null,
+          unitId: null,
+          amount: '4500.00',
+          currency: 'EUR',
+          validFrom: date('1900-01-01'),
+          validTo: null,
+          isActive: true,
+        },
+      });
+      expect(db.customer.findUnique).not.toHaveBeenCalled();
+      expect(db.b2bUnit.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('should check list price overlaps per sales area and material only', async () => {
+      await service.create({
+        ...listPriceCreate,
+        ...POLAND,
+        amount: '1899.99',
+      });
+
+      expect(db.priceCondition.findFirst).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          ...POLAND,
+          materialNumber: 'MAT-001',
+          scope: 'SALES_AREA',
+          soldToCustomerNumber: null,
+          unitId: null,
+        }) as unknown,
+        orderBy: { validFrom: 'asc' },
+      });
     });
 
     it('should report all problems at once', async () => {
@@ -437,7 +668,7 @@ describe('PriceConditionsService', () => {
           validFrom: '2027-01-01',
         }),
         [
-          'currency must be EUR, the currency of material MAT-001',
+          'currency must be EUR, the currency of sales area 1000/10/00',
           'soldToCustomerNumber OLD is inactive',
           'validTo must not be before validFrom',
         ],
@@ -468,7 +699,7 @@ describe('PriceConditionsService', () => {
 
   describe('condition type', () => {
     it.each(['ZP02', 'ZP03'])(
-      'should accept the price condition type %s for any scope',
+      'should accept the price condition type %s for Sold-to and unit scope',
       async (conditionTypeCode) => {
         await service.create({ ...soldToCreate, conditionTypeCode });
         await service.create({ ...unitCreate, conditionTypeCode });
@@ -495,10 +726,10 @@ describe('PriceConditionsService', () => {
         ['conditionTypeCode ZOLD (Retired Price) is inactive'],
       ],
       [
-        'the list price ZP01, which comes from the material master',
+        'the list price ZP01 for a Sold-to (configured for SALES_AREA only)',
         'ZP01',
         [
-          'conditionTypeCode ZP01 (List Price) is not allowed for condition records by its configuration',
+          'conditionTypeCode ZP01 (List Price) cannot be used with scope SOLD_TO; allowed scopes: SALES_AREA',
         ],
       ],
       [
@@ -528,6 +759,19 @@ describe('PriceConditionsService', () => {
         await expect422(
           service.create({ ...soldToCreate, conditionTypeCode }),
           messages,
+        );
+        expectNoWrites();
+      },
+    );
+
+    it.each(['ZP02', 'ZP03'])(
+      'should not allow %s as list price of the sales area',
+      async (conditionTypeCode) => {
+        await expect422(
+          service.create({ ...listPriceCreate, conditionTypeCode }),
+          [
+            `conditionTypeCode ${conditionTypeCode} (${conditionTypeCode === 'ZP02' ? 'Customer Net Price' : 'Special Price'}) cannot be used with scope SALES_AREA; allowed scopes: SOLD_TO, B2B_UNIT`,
+          ],
         );
         expectNoWrites();
       },
@@ -627,6 +871,21 @@ describe('PriceConditionsService', () => {
       });
     });
 
+    it('should reject a changed JPY amount with decimal places', async () => {
+      db.priceCondition.findUniqueOrThrow.mockResolvedValue(
+        row({
+          ...JAPAN,
+          currency: 'JPY',
+          amount: new Prisma.Decimal('700000'),
+        }),
+      );
+
+      await expect422(service.update(7, { amount: '699999.99' }), [
+        'amount must be a whole amount: JPY has no decimal places',
+      ]);
+      expectNoWrites();
+    });
+
     it('should check the new period together with the stored end', async () => {
       await expect422(service.update(7, { validFrom: '2027-01-01' }), [
         'validTo must not be before validFrom',
@@ -713,15 +972,47 @@ describe('PriceConditionsService', () => {
         ]);
       });
 
-      it('should reject a condition whose material changed its currency', async () => {
+      it('should reject a Sold-to that became inactive in the sales area', async () => {
         db.priceCondition.findUniqueOrThrow.mockResolvedValue(
-          row({ isActive: false }),
+          row({ soldToCustomerNumber: 'PAUSED', isActive: false }),
         );
-        db.$queryRaw.mockResolvedValue([{ currency: 'CHF' }]);
 
         await expect422(service.update(7, { isActive: true }), [
-          'currency must be CHF, the currency of material MAT-001',
+          'soldToCustomerNumber PAUSED is inactive in sales area 1000/10/00',
         ]);
+      });
+
+      it('should reject a condition in a sales area that became inactive', async () => {
+        db.priceCondition.findUniqueOrThrow.mockResolvedValue(
+          row({ salesOrganization: '9000', isActive: false }),
+        );
+
+        await expect422(service.update(7, { isActive: true }), [
+          'salesArea 9000/10/00 is inactive',
+          'soldToCustomerNumber CUST-1000 is not assigned to sales area 9000/10/00',
+        ]);
+      });
+
+      it('should check the configured scopes of the condition type again', async () => {
+        // ZP03 is now configured for SOLD_TO only (a configuration change)
+        db.conditionType.findUnique.mockImplementation(() => ({
+          ...CONDITION_TYPES.find((t) => t.code === 'ZP03'),
+          allowedScopes: [{ scope: 'SOLD_TO' }],
+        }));
+        db.priceCondition.findUniqueOrThrow.mockResolvedValue(
+          row({
+            conditionTypeCode: 'ZP03',
+            scope: 'B2B_UNIT',
+            soldToCustomerNumber: null,
+            unitId: 'UNIT-S',
+            isActive: false,
+          }),
+        );
+
+        await expect422(service.update(7, { isActive: true }), [
+          'conditionTypeCode ZP03 (Special Price) cannot be used with scope B2B_UNIT; allowed scopes: SOLD_TO',
+        ]);
+        expectNoWrites();
       });
 
       it('should answer 409 when the reactivated period overlaps', async () => {

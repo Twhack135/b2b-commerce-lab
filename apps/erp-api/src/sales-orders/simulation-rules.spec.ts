@@ -11,6 +11,7 @@ import {
   optionalText,
   requestedDeliveryDateMessages,
   resolvePartners,
+  salesAreaMessages,
   sameMaterialMessages,
   shippingMessages,
   simulationStatus,
@@ -83,8 +84,18 @@ function determination(
   currency = 'EUR',
 ): Determination {
   return {
-    source: 'BASE_PRICE',
-    condition: null,
+    status: 'PRICED',
+    source: 'SALES_AREA',
+    condition: {
+      conditionId: 5,
+      scope: 'SALES_AREA',
+      salesArea: DE,
+      amount: d(unitPrice),
+      currency,
+      validFrom: '1900-01-01',
+      validTo: null,
+      isActive: true,
+    },
     unitPrice: d(unitPrice),
     netValue: d(unitPrice).mul(quantity),
     currency,
@@ -93,10 +104,18 @@ function determination(
   };
 }
 
-const material = (materialNumber: string, currency = 'EUR') => ({
+const material = (materialNumber: string) => ({
   materialNumber,
   description: `Material ${materialNumber}`,
-  price: d('1'),
+  price: null,
+  currency: null,
+});
+
+const EUR = { code: 'EUR', decimals: 2 };
+const JPY = { code: 'JPY', decimals: 0 };
+const context = (currency = EUR) => ({
+  salesArea: DE,
+  pricingDate: '2026-11-15',
   currency,
 });
 
@@ -110,7 +129,7 @@ function items(positions: [string, number, string | null, string?][]): {
       price === null
         ? { material: null, determination: null }
         : {
-            material: material(materialNumber, currency),
+            material: material(materialNumber),
             determination: determination(price, quantity, currency),
           },
   );
@@ -120,6 +139,7 @@ function items(positions: [string, number, string | null, string?][]): {
       quantity,
     })),
     pricings,
+    context(),
   );
 }
 
@@ -252,7 +272,121 @@ describe('resolvePartners', () => {
   });
 });
 
+describe('salesAreaMessages', () => {
+  const PL = { ...DE, salesOrganization: '2000' };
+  const germany = { key: DE, isActive: true, currency: EUR };
+
+  it('accepts an active sales area and a unit that belongs to it', () => {
+    expect(salesAreaMessages(DE, germany, { unitId: 'U', ...DE })).toEqual([]);
+  });
+
+  it('reports a sales area that does not exist', () => {
+    expect(salesAreaMessages(PL, null, { unitId: 'U', ...DE })).toEqual([
+      {
+        severity: 'ERROR',
+        code: 'SALES_AREA_NOT_FOUND',
+        text: 'Sales area 2000/10/00 does not exist.',
+        field: 'salesOrganization',
+      },
+    ]);
+  });
+
+  it('reports an inactive sales area and a unit of another one', () => {
+    expect(
+      salesAreaMessages(
+        PL,
+        { key: PL, isActive: false, currency: { code: 'PLN', decimals: 2 } },
+        { unitId: 'UNIT-STUTTGART', ...DE },
+      ).map((m) => [m.code, m.text, m.field]),
+    ).toEqual([
+      [
+        'SALES_AREA_INACTIVE',
+        'Sales area 2000/10/00 is inactive.',
+        'salesOrganization',
+      ],
+      [
+        'UNIT_NOT_IN_SALES_AREA',
+        'B2B unit UNIT-STUTTGART belongs to sales area 1000/10/00, not 2000/10/00.',
+        'unitId',
+      ],
+    ]);
+  });
+
+  it('leaves an unknown unit to the partner check', () => {
+    expect(salesAreaMessages(DE, germany, null)).toEqual([]);
+  });
+});
+
 describe('buildItems', () => {
+  it('reports a material without price at its position', () => {
+    const { items: result, netValues } = buildItems(
+      [{ materialNumber: 'MAT-009', quantity: 1 }],
+      [
+        {
+          material: material('MAT-009'),
+          determination: {
+            status: 'NO_PRICE_FOUND',
+            currency: 'EUR',
+            steps: [],
+          },
+        },
+      ],
+      context(),
+    );
+    expect(netValues).toEqual([null]);
+    expect(result[0]).toMatchObject({
+      materialDescription: 'Material MAT-009',
+      unitPrice: null,
+      netValue: null,
+      currency: null,
+      pricing: null,
+      messages: [
+        {
+          severity: 'ERROR',
+          code: 'NO_PRICE_FOUND',
+          text: 'No price found for material MAT-009 in sales area 1000/10/00 on 2026-11-15.',
+          field: 'materialNumber',
+        },
+      ],
+    });
+  });
+
+  it('formats amounts with the decimal places of the currency (JPY: none)', () => {
+    const { items: result } = buildItems(
+      [{ materialNumber: 'MAT-001', quantity: 3 }],
+      [
+        {
+          material: material('MAT-001'),
+          determination: determination('700000', 3, 'JPY'),
+        },
+      ],
+      context(JPY),
+    );
+    expect(result[0]).toMatchObject({
+      unitPrice: '700000',
+      netValue: '2100000',
+      currency: 'JPY',
+    });
+    expect(result[0].pricing).toMatchObject({
+      source: 'SALES_AREA',
+      conditionId: 5,
+      validFrom: '1900-01-01',
+    });
+  });
+
+  it('prices nothing without a currency (sales area unknown)', () => {
+    const { items: result } = buildItems(
+      [{ materialNumber: 'MAT-001', quantity: 1 }],
+      [{ material: material('MAT-001'), determination: null }],
+      { ...context(), currency: null },
+    );
+    expect(result[0]).toMatchObject({
+      unitPrice: null,
+      pricing: null,
+      messages: [],
+    });
+  });
+
   it('numbers the positions 10, 20, 30 in request order', () => {
     const { items: result } = items([
       ['MAT-002', 10, '189.50'],
@@ -423,7 +557,7 @@ describe('simulationStatus and totals', () => {
       ['MAT-001', 2, '4500.00'],
       ['MAT-002', 10, '189.50'],
     ]);
-    expect(totalsOf('VALID', built.items, built.netValues)).toEqual({
+    expect(totalsOf('VALID', built.netValues, EUR)).toEqual({
       netValue: '10895.00',
       currency: 'EUR',
       includes: 'NET_EXCL_TAX_AND_FREIGHT',
@@ -439,9 +573,7 @@ describe('simulationStatus and totals', () => {
       ]),
     );
     // 200 x 0.30; as JavaScript numbers this sum would not be exact
-    expect(totalsOf('VALID', built.items, built.netValues)?.netValue).toBe(
-      '60.00',
-    );
+    expect(totalsOf('VALID', built.netValues, EUR)?.netValue).toBe('60.00');
   });
 
   it('returns no total for an invalid simulation', () => {
@@ -449,15 +581,28 @@ describe('simulationStatus and totals', () => {
       ['A', 1, '1.00'],
       ['X', 1, null],
     ]);
-    expect(totalsOf('INVALID', built.items, built.netValues)).toBeNull();
+    expect(totalsOf('INVALID', built.netValues, EUR)).toBeNull();
+  });
+
+  it('totals in the document currency, JPY without decimal places', () => {
+    expect(totalsOf('VALID', [d('1400000'), d('295000')], JPY)).toEqual({
+      netValue: '1695000',
+      currency: 'JPY',
+      includes: 'NET_EXCL_TAX_AND_FREIGHT',
+    });
+  });
+
+  it('returns no total without a document currency', () => {
+    expect(totalsOf('VALID', [d('1')], null)).toBeNull();
   });
 });
 
 describe('checksOf', () => {
   it('lists the performed and the not performed checks', () => {
     const { items: result } = items([['A', 1, '1.00']]);
-    const checks = checksOf([], result, []);
+    const checks = checksOf([], [], result, []);
     expect(checks.map((c) => `${c.check}:${c.result}`)).toEqual([
+      'SALES_AREA:PASSED',
       'PARTNERS:PASSED',
       'MATERIALS:PASSED',
       'PRICING:PASSED',
@@ -478,11 +623,13 @@ describe('checksOf', () => {
   it('marks failed checks', () => {
     const { items: result } = items([['X', 1, null]]);
     const checks = checksOf(
+      [{ severity: 'ERROR', code: 'UNIT_NOT_IN_SALES_AREA', text: 't' }],
       [{ severity: 'ERROR', code: 'UNIT_NOT_FOUND', text: 't' }],
       result,
       [],
     );
-    expect(checks.slice(0, 4).map((c) => `${c.check}:${c.result}`)).toEqual([
+    expect(checks.slice(0, 5).map((c) => `${c.check}:${c.result}`)).toEqual([
+      'SALES_AREA:FAILED',
       'PARTNERS:FAILED',
       'MATERIALS:FAILED',
       'PRICING:FAILED',

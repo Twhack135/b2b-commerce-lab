@@ -2,9 +2,16 @@
 // service), so they protect the data even if the API checks are bypassed.
 import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { createPricingData, createTestApp, resetDatabase } from './helpers';
+import {
+  createPricingData,
+  createTestApp,
+  LIST_PRICE_ID,
+  resetDatabase,
+} from './helpers';
 
 type Row = {
+  type?: string;
+  org?: string;
   material?: string;
   scope?: string;
   soldTo?: string | null;
@@ -33,9 +40,14 @@ describe('price_conditions database rules', () => {
     await createPricingData(prisma);
   });
 
-  /** Inserts one row with SQL; defaults: active Sold-to condition for ACC */
+  /**
+   * Inserts one row with SQL; defaults: active ZP02 Sold-to condition for
+   * ACC in sales area 1000/10/00 (EUR)
+   */
   const insert = (row: Row = {}) => {
     const r = {
+      type: 'ZP02',
+      org: '1000',
       material: 'MAT-1',
       scope: 'SOLD_TO',
       soldTo: 'ACC',
@@ -48,12 +60,22 @@ describe('price_conditions database rules', () => {
       ...row,
     };
     return prisma.$executeRaw`
-      INSERT INTO price_conditions (condition_type_code, material_number, scope, sold_to_customer_number,
+      INSERT INTO price_conditions (condition_type_code, sales_organization,
+        distribution_channel, division, material_number, scope, sold_to_customer_number,
         unit_id, amount, currency, valid_from, valid_to, is_active, updated_at)
-      VALUES ('ZP02', ${r.material}, ${r.scope}::price_condition_scope, ${r.soldTo},
-        ${r.unit}, ${r.amount}::numeric, ${r.currency}, ${r.from}::date,
+      VALUES (${r.type}, ${r.org}, '10', '00', ${r.material}, ${r.scope}::price_condition_scope,
+        ${r.soldTo}, ${r.unit}, ${r.amount}::numeric, ${r.currency}, ${r.from}::date,
         ${r.to}::date, ${r.active}, now())`;
   };
+
+  /** A list price (ZP01) of the sales area, without key */
+  const listRow = (row: Row = {}): Row => ({
+    type: 'ZP01',
+    scope: 'SALES_AREA',
+    soldTo: null,
+    unit: null,
+    ...row,
+  });
 
   const unitRow = (row: Row = {}): Row => ({
     scope: 'B2B_UNIT',
@@ -112,12 +134,27 @@ describe('price_conditions database rules', () => {
     it.each([
       ['a directly following period', { from: '2027-01-01', to: null }],
       ['a directly preceding period', { from: '2025-01-01', to: '2025-12-31' }],
-      ['another material', { material: 'MAT-2', currency: 'CHF' }],
+      ['another material', { material: 'MAT-2' }],
       ['another Sold-to', { soldTo: 'M1' }],
       ['an inactive duplicate', { active: false }],
       ['a unit condition for the same material and period', unitRow()],
     ])('allows %s', async (_case, row) => {
       await insert();
+      await expect(codeOf(insert(row))).resolves.toBe('ok');
+    });
+
+    // The test data has the open-ended German list price 9001 for MAT-1
+    it('rejects an overlapping list price of the same sales area and material', async () => {
+      await expect(
+        codeOf(insert(listRow({ from: '2030-01-01', to: null }))),
+      ).resolves.toBe('23P01');
+    });
+
+    it.each([
+      ['another sales area', listRow({ org: '2000', currency: 'PLN' })],
+      ['another material', listRow({ material: 'MAT-2' })],
+      ['an inactive duplicate', listRow({ active: false })],
+    ])('allows a list price for %s', async (_case, row) => {
       await expect(codeOf(insert(row))).resolves.toBe('ok');
     });
 
@@ -138,6 +175,14 @@ describe('price_conditions database rules', () => {
       ['a Sold-to condition with a unit', { unit: 'U1' }],
       ['a unit condition without unit', unitRow({ unit: null })],
       ['a unit condition with a Sold-to', unitRow({ soldTo: 'ACC' })],
+      [
+        'a list price with a Sold-to',
+        listRow({ soldTo: 'ACC', org: '2000', currency: 'PLN' }),
+      ],
+      [
+        'a list price with a unit',
+        listRow({ unit: 'U1', org: '2000', currency: 'PLN' }),
+      ],
       ['an amount of zero', { amount: '0' }],
       ['a negative amount', { amount: '-5.00' }],
       ['an end before the start', { from: '2026-12-31', to: '2026-01-01' }],
@@ -158,8 +203,39 @@ describe('price_conditions database rules', () => {
       ['an unknown material', { material: 'NOPE' }],
       ['an unknown Sold-to', { soldTo: 'NOPE' }],
       ['an unknown unit', unitRow({ unit: 'NOPE' })],
+      // Sprint 9C-B: market consistency
+      ['a sales area that is not configured', listRow({ org: '9999' })],
+      [
+        'a Sold-to that is not assigned to the sales area',
+        { org: '2000', currency: 'PLN' },
+      ],
+      [
+        'a unit of another sales area',
+        unitRow({ org: '2000', currency: 'PLN' }),
+      ],
+      [
+        'another currency than the sales organization',
+        listRow({ org: '2000' }),
+      ],
+      ['EUR prices in Japan', listRow({ org: '3000' })],
+      ['an unknown currency', listRow({ org: '2000', currency: 'XXX' })],
+      // Condition type and scope must be configured together
+      ['ZP01 for a Sold-to', { type: 'ZP01' }],
+      [
+        'ZP02 as list price',
+        listRow({ type: 'ZP02', org: '2000', currency: 'PLN' }),
+      ],
+      ['a discount type', { type: 'ZD01' }],
     ])('rejects %s', async (_case, row) => {
       await expect(codeOf(insert(row))).resolves.toBe('23503');
+    });
+
+    it('keeps a sales organization from changing its currency while conditions use it', async () => {
+      await expect(
+        codeOf(
+          prisma.$executeRaw`UPDATE sales_organizations SET currency_code = 'PLN' WHERE code = '1000'`,
+        ),
+      ).resolves.toBe('23001');
     });
 
     // ON DELETE RESTRICT is reported as restrict_violation (23001)
@@ -182,7 +258,11 @@ describe('price_conditions database rules', () => {
       await expect(
         codeOf(prisma.$executeRaw`DELETE FROM b2b_units WHERE unit_id = 'U1'`),
       ).resolves.toBe('23001');
-      await expect(prisma.priceCondition.count()).resolves.toBe(2);
+      await expect(
+        prisma.priceCondition.count({
+          where: { conditionId: { lt: LIST_PRICE_ID } },
+        }),
+      ).resolves.toBe(2);
     });
   });
 });

@@ -11,19 +11,11 @@ const GERMANY = {
   division: '00',
 };
 
+// Materials have no price of their own (materials.price is deprecated);
+// their list prices are the ZP01 conditions below
 const materials = [
-  {
-    materialNumber: 'MAT-001',
-    description: 'Heat Pump',
-    price: '4500.00',
-    currency: 'EUR',
-  },
-  {
-    materialNumber: 'MAT-002',
-    description: 'Thermostat',
-    price: '199.00',
-    currency: 'EUR',
-  },
+  { materialNumber: 'MAT-001', description: 'Heat Pump' },
+  { materialNumber: 'MAT-002', description: 'Thermostat' },
 ];
 
 const customers = [
@@ -101,8 +93,31 @@ const b2bUnits = [
   },
 ];
 
-// Example prices; open-ended unless validTo is set. Dates are YYYY-MM-DD.
+// Example prices in the German sales area; open-ended unless validTo is
+// set. Dates are YYYY-MM-DD. No prices exist for Poland or Japan.
 const priceConditions = [
+  {
+    conditionTypeCode: 'ZP01',
+    materialNumber: 'MAT-001',
+    scope: 'SALES_AREA',
+    soldToCustomerNumber: null,
+    unitId: null,
+    amount: '4500.00',
+    currency: 'EUR',
+    validFrom: '2026-01-01',
+    validTo: null,
+  },
+  {
+    conditionTypeCode: 'ZP01',
+    materialNumber: 'MAT-002',
+    scope: 'SALES_AREA',
+    soldToCustomerNumber: null,
+    unitId: null,
+    amount: '199.00',
+    currency: 'EUR',
+    validFrom: '2026-01-01',
+    validTo: null,
+  },
   {
     conditionTypeCode: 'ZP02',
     materialNumber: 'MAT-001',
@@ -226,11 +241,12 @@ async function main() {
   }
   console.log(`Seeded ${b2bUnits.length} B2B units`);
 
-  // A condition is only created if its material and Sold-to or unit have no
+  // A condition is only created if its sales area, material and key have no
   // condition yet, so running the seed again never creates overlaps
   for (const condition of priceConditions) {
     const existing = await prisma.priceCondition.findFirst({
       where: {
+        ...GERMANY,
         materialNumber: condition.materialNumber,
         scope: condition.scope,
         soldToCustomerNumber: condition.soldToCustomerNumber,
@@ -242,6 +258,7 @@ async function main() {
     await prisma.priceCondition.create({
       data: {
         ...condition,
+        ...GERMANY,
         validFrom: new Date(`${condition.validFrom}T00:00:00.000Z`),
         validTo:
           condition.validTo && new Date(`${condition.validTo}T00:00:00.000Z`),

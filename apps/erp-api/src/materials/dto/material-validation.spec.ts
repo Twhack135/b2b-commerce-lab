@@ -30,6 +30,25 @@ describe('CreateMaterialDto validation', () => {
     );
   });
 
+  // Since Sprint 9C-B price and currency are deprecated and optional
+  it('should accept a material without price and currency', async () => {
+    await expect(
+      validate(
+        { materialNumber: 'MAT-004', description: 'Valve' },
+        CreateMaterialDto,
+      ),
+    ).resolves.toEqual({ materialNumber: 'MAT-004', description: 'Valve' });
+  });
+
+  it.each([
+    ['a null price', { price: null }],
+    ['a null currency', { currency: null }],
+  ])('should reject %s', async (_case, change) => {
+    await expect(
+      validate({ ...validCreateBody, ...change }, CreateMaterialDto),
+    ).rejects.toThrow();
+  });
+
   it.each([['MAT-001'], ['MAT 001'], ['A'], ['100-200/X']])(
     'should keep the valid material number %p unchanged',
     async (materialNumber) => {

@@ -1,16 +1,12 @@
-import { CalculationType, ConditionClass } from '../generated/prisma/enums';
+import {
+  CalculationType,
+  ConditionClass,
+  PriceConditionScope,
+} from '../generated/prisma/enums';
 import {
   ConditionRecordRestriction,
   ConditionTypeSummary,
 } from './condition-type.interface';
-
-/**
- * TRANSITIONAL: the list price of a material comes from materials.price and
- * is shown as this condition type. Once list prices are condition records
- * with their own validity, this constant and the special base price step
- * of the pricing engine go away.
- */
-export const LIST_PRICE_CONDITION_TYPE = 'ZP01';
 
 /**
  * What the pricing engine can calculate today: prices per unit. Discounts,
@@ -89,4 +85,23 @@ export function conditionTypeViolations(
     default:
       return [];
   }
+}
+
+/**
+ * Why a condition type cannot be used with a scope, or no message if it
+ * can. The allowed scopes are configuration (condition_type_scopes), e.g.
+ * ZP01 only per sales area; the database enforces the same rule.
+ */
+export function scopeViolations(
+  code: string,
+  type: { name: string; allowedScopes: { scope: PriceConditionScope }[] },
+  scope: PriceConditionScope,
+): string[] {
+  const allowed = type.allowedScopes.map((s) => s.scope);
+  if (allowed.includes(scope)) return [];
+  return [
+    allowed.length === 0
+      ? `conditionTypeCode ${code} (${type.name}) cannot be used with scope ${scope}: no scope is configured for it`
+      : `conditionTypeCode ${code} (${type.name}) cannot be used with scope ${scope}; allowed scopes: ${allowed.join(', ')}`,
+  ];
 }

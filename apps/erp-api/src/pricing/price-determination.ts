@@ -1,26 +1,45 @@
-import { Decimal, roundAmount } from '../common/money';
+import {
+  CurrencyPrecision,
+  Decimal,
+  fitsCurrency,
+  roundToCurrency,
+} from '../common/money';
 import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
 import { PriceConditionScope } from '../generated/prisma/enums';
+import {
+  formatSalesArea,
+  SalesAreaKey,
+  sameSalesArea,
+} from '../sales-areas/sales-area-key';
 
 // Price determination without database access, so every rule can be tested
 // directly. Comparable to an SAP access sequence for prices: the levels below
-// decide which price is used; the condition type of a record (e.g. ZP02) is
-// carried along as metadata and does not change the precedence. A future
-// pricing procedure will combine several condition types (list price,
-// discounts, freight, tax) in one calculation.
+// decide which price is used; the condition type of a record (e.g. ZP01,
+// ZP02) is carried along as metadata and does not change the precedence. A
+// future pricing procedure will combine several condition types (list
+// price, discounts, freight, tax) in one calculation.
+//
+// Prices are determined in exactly one sales area and its currency. There is
+// no currency conversion: a condition of another sales area or currency is
+// never used.
 
-export type PricingSource = PriceConditionScope | 'BASE_PRICE';
+export type PricingSource = PriceConditionScope;
 
 /** Condition levels in the order they are checked; the first match wins */
 export const ACCESS_SEQUENCE: readonly PriceConditionScope[] = [
   PriceConditionScope.B2B_UNIT,
   PriceConditionScope.SOLD_TO,
+  PriceConditionScope.SALES_AREA,
 ];
 
-/** A stored condition that may apply (same material and Sold-to or unit) */
+/**
+ * A stored condition that may apply: same sales area and material, and
+ * the unit, its Sold-to or no key (list price of the sales area)
+ */
 export interface ConditionCandidate {
   conditionId: number;
   scope: PriceConditionScope;
+  salesArea: SalesAreaKey;
   amount: Decimal;
   currency: string;
   /** YYYY-MM-DD, inclusive */
@@ -36,13 +55,11 @@ export interface DeterminationInput {
   /** YYYY-MM-DD */
   pricingDate: string;
   quantity: number;
-  /** Material.price, the fallback */
-  basePrice: Decimal;
-  /** Material.currency; all conditions must use it */
-  currency: string;
+  /** The sales area prices are determined in */
+  salesArea: SalesAreaKey;
+  /** Document currency of the sales area; all conditions must use it */
+  currency: CurrencyPrecision & { code: string };
   candidates: ConditionCandidate[];
-  /** Condition type shown for the base price (ZP01, transitional) */
-  baseConditionType?: ConditionTypeSummary | null;
 }
 
 /** One checked level, as in the SAP pricing analysis */
@@ -53,21 +70,32 @@ export interface PricingStep {
   amount: Decimal | null;
   /** True for the level whose price is used */
   applied: boolean;
-  /** Condition type of the valid condition (ZP01 for the base price) */
+  /** Condition type of the valid condition, e.g. ZP01 for the list price */
   conditionType: ConditionTypeSummary | null;
 }
 
-export interface Determination {
+/** A price was found */
+export interface PricedDetermination {
+  status: 'PRICED';
   source: PricingSource;
-  /** The winning condition (null for the base price) */
-  condition: ConditionCandidate | null;
+  /** The winning condition */
+  condition: ConditionCandidate;
   unitPrice: Decimal;
   netValue: Decimal;
   currency: string;
-  /** Condition type of the used price (ZP01 for the base price) */
+  /** Condition type of the used price */
   conditionType: ConditionTypeSummary | null;
   steps: PricingStep[];
 }
+
+/** No level has a valid condition: the material has no price here */
+export interface UnpricedDetermination {
+  status: 'NO_PRICE_FOUND';
+  currency: string;
+  steps: PricingStep[];
+}
+
+export type Determination = PricedDetermination | UnpricedDetermination;
 
 export function isValidOn(condition: ConditionCandidate, date: string) {
   // YYYY-MM-DD texts compare like dates
@@ -80,11 +108,24 @@ export function isValidOn(condition: ConditionCandidate, date: string) {
 
 /**
  * Determines the price: the valid B2B unit condition, else the valid Sold-to
- * condition, else the base price. Fails instead of guessing if the stored
- * data is inconsistent (two valid conditions on one level, which the
- * database prevents, or a condition in another currency).
+ * condition, else the valid list price of the sales area. Without any of
+ * them, there is no price (NO_PRICE_FOUND); nothing is guessed or converted.
+ *
+ * Fails instead of guessing if the data is inconsistent: a candidate of
+ * another sales area or currency, an amount with more decimal places than
+ * the currency has, or two valid conditions on one level. The database and
+ * the services prevent all of these; a failure means a programming error.
  */
 export function determinePrice(input: DeterminationInput): Determination {
+  const area = formatSalesArea(input.salesArea);
+  for (const candidate of input.candidates) {
+    if (!sameSalesArea(candidate.salesArea, input.salesArea)) {
+      throw new Error(
+        `Price condition ${candidate.conditionId} belongs to sales area ${formatSalesArea(candidate.salesArea)}, not ${area}`,
+      );
+    }
+  }
+
   const steps: PricingStep[] = [];
   let winner: ConditionCandidate | null = null;
 
@@ -99,9 +140,14 @@ export function determinePrice(input: DeterminationInput): Determination {
       );
     }
     const match = valid[0] ?? null;
-    if (match && match.currency !== input.currency) {
+    if (match && match.currency !== input.currency.code) {
       throw new Error(
-        `Price condition ${match.conditionId} uses ${match.currency}, but the material uses ${input.currency}`,
+        `Price condition ${match.conditionId} uses ${match.currency}, but sales area ${area} uses ${input.currency.code}`,
+      );
+    }
+    if (match && !fitsCurrency(match.amount, input.currency)) {
+      throw new Error(
+        `Price condition ${match.conditionId} has more decimal places than ${input.currency.code} allows`,
       );
     }
     steps.push({
@@ -114,25 +160,21 @@ export function determinePrice(input: DeterminationInput): Determination {
     winner ??= match;
   }
 
-  steps.push({
-    source: 'BASE_PRICE',
-    conditionId: null,
-    amount: input.basePrice,
-    applied: winner === null,
-    conditionType: input.baseConditionType ?? null,
-  });
-
-  const unitPrice = winner?.amount ?? input.basePrice;
+  if (!winner) {
+    return { status: 'NO_PRICE_FOUND', currency: input.currency.code, steps };
+  }
   return {
-    source: winner?.scope ?? 'BASE_PRICE',
+    status: 'PRICED',
+    source: winner.scope,
     condition: winner,
-    unitPrice,
+    unitPrice: winner.amount,
     // Exact for whole quantities; rounded by the one central rule anyway
-    netValue: roundAmount(unitPrice.mul(input.quantity)),
-    currency: input.currency,
-    conditionType: winner
-      ? (winner.conditionType ?? null)
-      : (input.baseConditionType ?? null),
+    netValue: roundToCurrency(
+      winner.amount.mul(input.quantity),
+      input.currency,
+    ),
+    currency: input.currency.code,
+    conditionType: winner.conditionType ?? null,
     steps,
   };
 }

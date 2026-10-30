@@ -1,4 +1,8 @@
-import { CalculationType, ConditionClass } from '../generated/prisma/enums';
+import {
+  CalculationType,
+  ConditionClass,
+  PriceConditionScope,
+} from '../generated/prisma/enums';
 
 /**
  * Short view of a condition type, added to condition records and to the
@@ -16,8 +20,7 @@ export interface ConditionTypeSummary {
  * - INACTIVE: the type is deactivated (configuration)
  * - CALCULATION_NOT_SUPPORTED: the pricing engine cannot calculate its class
  *   and calculation type yet (code)
- * - NOT_ALLOWED_FOR_CONDITION_RECORDS: not allowed by its configuration,
- *   e.g. ZP01, which comes from the material master for now
+ * - NOT_ALLOWED_FOR_CONDITION_RECORDS: not allowed by its configuration
  */
 export type ConditionRecordRestriction =
   | 'INACTIVE'
@@ -38,4 +41,9 @@ export interface ConditionType extends ConditionTypeSummary {
   usableForPriceConditions: boolean;
   /** Why it is not usable; null if it is */
   restriction: ConditionRecordRestriction | null;
+  /**
+   * Added in Sprint 9C-B: the scopes records of this type may use
+   * (configuration), e.g. [SALES_AREA] for ZP01
+   */
+  allowedScopes: PriceConditionScope[];
 }

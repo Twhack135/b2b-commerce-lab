@@ -5,6 +5,10 @@ import {
   IsBusinessKey,
   IsCalendarDate,
 } from '../../common/validators';
+import {
+  IsSalesAreaPartCode,
+  IsSalesOrganizationCode,
+} from '../../sales-areas/sales-area-validators';
 
 export const MAX_QUANTITY = 99_999;
 
@@ -12,6 +16,18 @@ export class CalculatePriceDto {
   @IsString()
   @IsBusinessKey()
   materialNumber: string;
+
+  // Required: prices exist per sales area. The server checks that it is
+  // configured, active and the sales area of the unit, and takes the
+  // currency from it.
+  @IsSalesOrganizationCode()
+  salesOrganization: string;
+
+  @IsSalesAreaPartCode()
+  distributionChannel: string;
+
+  @IsSalesAreaPartCode()
+  division: string;
 
   // The Sold-to is taken from the unit
   @IsString()

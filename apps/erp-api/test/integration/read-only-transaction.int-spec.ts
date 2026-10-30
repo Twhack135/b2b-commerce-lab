@@ -35,12 +35,7 @@ describe('readOnlyTransaction (REPEATABLE READ, READ ONLY)', () => {
   beforeEach(async () => {
     await resetDatabase(prisma);
     await prisma.material.create({
-      data: {
-        materialNumber: 'MAT-1',
-        description: 'Heat Pump',
-        price: '4500.00',
-        currency: 'EUR',
-      },
+      data: { materialNumber: 'MAT-1', description: 'Heat Pump' },
     });
   });
 
@@ -61,12 +56,7 @@ describe('readOnlyTransaction (REPEATABLE READ, READ ONLY)', () => {
       'INSERT via Prisma',
       (tx: Parameters<Parameters<typeof readOnlyTransaction>[1]>[0]) =>
         tx.material.create({
-          data: {
-            materialNumber: 'MAT-2',
-            description: 'x',
-            price: '1.00',
-            currency: 'EUR',
-          },
+          data: { materialNumber: 'MAT-2', description: 'x' },
         }),
     ],
     [
@@ -74,7 +64,7 @@ describe('readOnlyTransaction (REPEATABLE READ, READ ONLY)', () => {
       (tx: Parameters<Parameters<typeof readOnlyTransaction>[1]>[0]) =>
         tx.material.update({
           where: { materialNumber: 'MAT-1' },
-          data: { price: '1.00' },
+          data: { description: 'x' },
         }),
     ],
     [
@@ -94,30 +84,30 @@ describe('readOnlyTransaction (REPEATABLE READ, READ ONLY)', () => {
 
     const stored = await prisma.material.findMany();
     expect(stored).toHaveLength(1);
-    expect(stored[0].price.toFixed(2)).toBe('4500.00');
+    expect(stored[0].description).toBe('Heat Pump');
   });
 
   it('sees one snapshot even if data changes during the transaction', async () => {
-    const prices = await readOnlyTransaction(prisma, async (tx) => {
+    const descriptions = await readOnlyTransaction(prisma, async (tx) => {
       const before = await tx.material.findUniqueOrThrow({
         where: { materialNumber: 'MAT-1' },
       });
       // Committed by another connection while the transaction is open
       await prisma.material.update({
         where: { materialNumber: 'MAT-1' },
-        data: { price: '4999.00' },
+        data: { description: 'Heat Pump XL' },
       });
       const after = await tx.material.findUniqueOrThrow({
         where: { materialNumber: 'MAT-1' },
       });
-      return [before.price.toFixed(2), after.price.toFixed(2)];
+      return [before.description, after.description];
     });
 
-    expect(prices).toEqual(['4500.00', '4500.00']);
+    expect(descriptions).toEqual(['Heat Pump', 'Heat Pump']);
     const committed = await prisma.material.findUniqueOrThrow({
       where: { materialNumber: 'MAT-1' },
     });
-    expect(committed.price.toFixed(2)).toBe('4999.00');
+    expect(committed.description).toBe('Heat Pump XL');
   });
 
   it('leaves later transactions and writes unaffected', async () => {
@@ -129,7 +119,7 @@ describe('readOnlyTransaction (REPEATABLE READ, READ ONLY)', () => {
       codeOf(
         prisma.material.update({
           where: { materialNumber: 'MAT-1' },
-          data: { price: '4600.00' },
+          data: { description: 'Heat Pump 2' },
         }),
       ),
     ).resolves.toBe('ok');
@@ -138,7 +128,7 @@ describe('readOnlyTransaction (REPEATABLE READ, READ ONLY)', () => {
         prisma.$transaction((tx) =>
           tx.material.update({
             where: { materialNumber: 'MAT-1' },
-            data: { price: '4700.00' },
+            data: { description: 'Heat Pump 3' },
           }),
         ),
       ),

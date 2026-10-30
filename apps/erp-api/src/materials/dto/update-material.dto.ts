@@ -10,6 +10,7 @@ export class UpdateMaterialDto {
   @IsNotBlank()
   description?: string;
 
+  // DEPRECATED since Sprint 9C-B, see CreateMaterialDto
   @IfPresent()
   @IsPrice()
   price?: number;

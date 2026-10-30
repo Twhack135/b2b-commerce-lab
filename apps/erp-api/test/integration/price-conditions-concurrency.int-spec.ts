@@ -1,16 +1,22 @@
 // Concurrent writes of price conditions must never store overlapping active
-// periods, never store an active condition in another currency than its
-// material and never answer with HTTP 500. Every scenario is repeated
+// periods (per sales area, material and key) and never answer with HTTP 500. Every scenario is repeated
 // several times, because timing differs per run.
 import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { createPricingData, createTestApp, resetDatabase } from './helpers';
+import {
+  createPricingData,
+  createTestApp,
+  GERMANY,
+  POLAND,
+  resetDatabase,
+} from './helpers';
 
 const ROUNDS = 10;
 const PARALLEL = 5;
 
 const soldToBody = {
   conditionTypeCode: 'ZP02',
+  ...GERMANY,
   materialNumber: 'MAT-1',
   scope: 'SOLD_TO',
   soldToCustomerNumber: 'ACC',
@@ -87,7 +93,6 @@ describe('Concurrent price condition writes (material row lock)', () => {
         .send({
           ...soldToBody,
           materialNumber: 'MAT-2',
-          currency: 'CHF',
           validFrom: '2026-01-01',
         }),
     ]);
@@ -120,34 +125,50 @@ describe('Concurrent price condition writes (material row lock)', () => {
     }
   });
 
-  it('never stores an active condition in another currency than the material', async () => {
+  // Since Sprint 9C-B list prices are condition records as well
+  const listPrice = (salesArea: typeof GERMANY, validFrom: string) => ({
+    conditionTypeCode: 'ZP01',
+    ...salesArea,
+    materialNumber: 'MAT-1',
+    scope: 'SALES_AREA',
+    amount: salesArea === GERMANY ? '4600.00' : '19999.00',
+    validFrom,
+  });
+
+  it('creates exactly one of several overlapping list prices of a sales area', async () => {
     for (let round = 0; round < ROUNDS; round++) {
       await prisma.priceCondition.deleteMany();
-      await prisma.material.update({
-        where: { materialNumber: 'MAT-1' },
-        data: { currency: 'EUR' },
-      });
 
-      const [conditionResponse, materialResponse] = await Promise.all([
-        http()
-          .post('/price-conditions')
-          .send({ ...soldToBody, validFrom: '2026-01-01' }),
-        http().patch('/materials/MAT-1').send({ currency: 'CHF' }),
-      ]);
+      const responses = await Promise.all(
+        Array.from({ length: PARALLEL }, (_, i) =>
+          http()
+            .post('/price-conditions')
+            .send(listPrice(GERMANY, `2026-0${i + 1}-01`)),
+        ),
+      );
 
-      // Whichever request got the lock first wins; the other one sees its result
-      expect([
-        [conditionResponse.status, materialResponse.status].join(' '),
-      ]).toEqual([expect.stringMatching(/^(201 422|422 200)$/) as unknown]);
-
-      const material = await prisma.material.findUniqueOrThrow({
-        where: { materialNumber: 'MAT-1' },
-      });
+      expect(statuses(responses)).toEqual([201, 409, 409, 409, 409]);
       await expect(
-        prisma.priceCondition.count({
-          where: { isActive: true, currency: { not: material.currency } },
-        }),
-      ).resolves.toBe(0);
+        prisma.priceCondition.count({ where: { scope: 'SALES_AREA' } }),
+      ).resolves.toBe(1);
     }
+  });
+
+  it('creates list prices of different sales areas in parallel', async () => {
+    await prisma.priceCondition.deleteMany();
+
+    const responses = await Promise.all([
+      http().post('/price-conditions').send(listPrice(GERMANY, '2026-01-01')),
+      http().post('/price-conditions').send(listPrice(POLAND, '2026-01-01')),
+    ]);
+
+    expect(statuses(responses)).toEqual([201, 201]);
+    const stored = await prisma.priceCondition.findMany({
+      orderBy: { salesOrganization: 'asc' },
+    });
+    expect(stored.map((c) => `${c.salesOrganization}:${c.currency}`)).toEqual([
+      '1000:EUR',
+      '2000:PLN',
+    ]);
   });
 });

@@ -1,6 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { createPricingData, createTestApp, resetDatabase } from './helpers';
+import {
+  createPricingData,
+  createTestApp,
+  GERMANY,
+  LIST_PRICE_ID,
+  POLAND,
+  resetDatabase,
+} from './helpers';
 
 type Result = {
   source: string;
@@ -45,16 +52,16 @@ describe('Pricing API', () => {
       .post('/price-conditions')
       .send({
         conditionTypeCode: 'ZP02',
+        ...GERMANY,
         materialNumber: 'MAT-1',
-        currency: 'EUR',
         ...body,
       })
       .expect(201);
     return (response.body as { conditionId: number }).conditionId;
   };
 
-  // Timeline for MAT-1 and unit U1 (Sold-to ACC):
-  //   until 2025-12-31          base price 4500.00
+  // Timeline for MAT-1 and unit U1 (Sold-to ACC) in sales area 1000/10/00:
+  //   until 2025-12-31          list price (ZP01) 4500.00
   //   2026-01-01 .. 2026-12-31  Sold-to price 4350.00
   //   2026-07-01 .. open        unit price 4200.00 (wins from July)
   //   2027-01-01 .. open        another, inactive Sold-to price
@@ -86,7 +93,7 @@ describe('Pricing API', () => {
   const price = (body: object) =>
     http()
       .post('/pricing/price')
-      .send({ materialNumber: 'MAT-1', unitId: 'U1', ...body });
+      .send({ materialNumber: 'MAT-1', unitId: 'U1', ...GERMANY, ...body });
 
   const resultOn = async (pricingDate: string) => {
     const { body } = await price({ pricingDate }).expect(200);
@@ -94,7 +101,7 @@ describe('Pricing API', () => {
   };
 
   it.each([
-    ['2025-12-31', 'BASE_PRICE', '4500.00'],
+    ['2025-12-31', 'SALES_AREA', '4500.00'],
     ['2026-01-01', 'SOLD_TO', '4350.00'],
     ['2026-06-30', 'SOLD_TO', '4350.00'],
     ['2026-07-01', 'B2B_UNIT', '4200.00'],
@@ -116,6 +123,7 @@ describe('Pricing API', () => {
     expect(body).toEqual({
       materialNumber: 'MAT-1',
       materialDescription: 'Heat Pump',
+      salesArea: GERMANY,
       unitId: 'U1',
       soldToCustomerNumber: 'ACC',
       pricingDate: '2026-11-15',
@@ -144,8 +152,8 @@ describe('Pricing API', () => {
           conditionType: ZP02,
         },
         {
-          source: 'BASE_PRICE',
-          conditionId: null,
+          source: 'SALES_AREA',
+          conditionId: LIST_PRICE_ID,
           amount: '4500.00',
           applied: false,
           conditionType: ZP01,
@@ -161,7 +169,7 @@ describe('Pricing API', () => {
       .expect(200);
 
     await expect(resultOn('2027-06-01')).resolves.toMatchObject({
-      source: 'BASE_PRICE',
+      source: 'SALES_AREA',
       unitPrice: '4500.00',
     });
   });
@@ -175,14 +183,13 @@ describe('Pricing API', () => {
     });
 
     await expect(resultOn('2025-06-01')).resolves.toMatchObject({
-      source: 'BASE_PRICE',
+      source: 'SALES_AREA',
     });
   });
 
   it('calculates exact values for small amounts and large quantities', async () => {
     await createCondition({
       materialNumber: 'MAT-2',
-      currency: 'CHF',
       scope: 'B2B_UNIT',
       unitId: 'U1',
       amount: '0.10',
@@ -194,6 +201,7 @@ describe('Pricing API', () => {
       .send({
         materialNumber: 'MAT-2',
         unitId: 'U1',
+        ...GERMANY,
         pricingDate: '2026-01-01',
         quantity: 99999,
       })
@@ -202,16 +210,77 @@ describe('Pricing API', () => {
     expect(body).toMatchObject({
       unitPrice: '0.10',
       netValue: '9999.90',
-      currency: 'CHF',
+      currency: 'EUR',
     });
   });
 
-  it('uses the current base price as fallback', async () => {
+  it('never uses the deprecated material price', async () => {
     await http().patch('/materials/MAT-1').send({ price: 4599.99 }).expect(200);
 
     await expect(resultOn('2025-01-01')).resolves.toMatchObject({
-      unitPrice: '4599.99',
+      source: 'SALES_AREA',
+      unitPrice: '4500.00',
     });
+  });
+
+  it('uses a new list price from its start date', async () => {
+    await http()
+      .patch(`/price-conditions/${LIST_PRICE_ID}`)
+      .send({ validTo: '2025-12-31' })
+      .expect(200);
+    await createCondition({
+      conditionTypeCode: 'ZP01',
+      scope: 'SALES_AREA',
+      amount: '4699.00',
+      validFrom: '2026-01-01',
+    });
+
+    await expect(resultOn('2025-12-31')).resolves.toMatchObject({
+      unitPrice: '4500.00',
+    });
+    await http()
+      .patch(`/price-conditions/${unitId}`)
+      .send({ isActive: false })
+      .expect(200);
+    await expect(resultOn('2027-01-01')).resolves.toMatchObject({
+      source: 'SALES_AREA',
+      unitPrice: '4699.00',
+    });
+  });
+
+  it('answers 422 NO_PRICE_FOUND for a material without a German price', async () => {
+    // MAT-2 only has a Polish list price
+    const response = await price({
+      materialNumber: 'MAT-2',
+      pricingDate: '2026-11-15',
+    }).expect(422);
+
+    expect(response.body).toMatchObject({
+      statusCode: 422,
+      code: 'NO_PRICE_FOUND',
+      message: [
+        'No price found for material MAT-2 in sales area 1000/10/00 on 2026-11-15',
+      ],
+    });
+    expect(
+      (response.body as { steps: { source: string; conditionId: null }[] })
+        .steps,
+    ).toEqual([
+      expect.objectContaining({ source: 'B2B_UNIT', conditionId: null }),
+      expect.objectContaining({ source: 'SOLD_TO', conditionId: null }),
+      expect.objectContaining({ source: 'SALES_AREA', conditionId: null }),
+    ]);
+  });
+
+  it('answers 422 instead of pricing a German unit in Poland', async () => {
+    const response = await price({
+      ...POLAND,
+      materialNumber: 'MAT-2',
+      pricingDate: '2026-11-15',
+    }).expect(422);
+    expect((response.body as { message: string[] }).message).toEqual([
+      'unitId U1 belongs to sales area 1000/10/00, not 2000/10/00',
+    ]);
   });
 
   it.each([
@@ -239,6 +308,10 @@ describe('Pricing API', () => {
     ['an invalid pricing date', { pricingDate: '2026-13-01' }],
     ['quantity 0', { pricingDate: '2026-11-15', quantity: 0 }],
     ['a fractional quantity', { pricingDate: '2026-11-15', quantity: 0.5 }],
+    [
+      'a missing sales area',
+      { pricingDate: '2026-11-15', salesOrganization: undefined },
+    ],
   ])('answers 400 for %s', async (_case, body) => {
     await price(body).expect(400);
   });

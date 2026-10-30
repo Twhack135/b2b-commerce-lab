@@ -2,9 +2,8 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
-import { Material as MaterialRecord, Prisma } from '../generated/prisma/client';
+import { Material as MaterialRecord } from '../generated/prisma/client';
 import {
   isPrismaError,
   RECORD_NOT_FOUND,
@@ -42,8 +41,8 @@ export class MaterialsService {
         data: {
           materialNumber: dto.materialNumber,
           description: dto.description,
-          price: dto.price,
-          currency: dto.currency,
+          price: dto.price ?? null,
+          currency: dto.currency ?? null,
         },
       });
       return toMaterial(material);
@@ -62,18 +61,15 @@ export class MaterialsService {
     dto: UpdateMaterialDto,
   ): Promise<Material> {
     try {
-      const material = await this.prisma.$transaction(async (tx) => {
-        if (dto.currency !== undefined) {
-          await assertCurrencyChangeAllowed(tx, materialNumber, dto.currency);
-        }
-        return tx.material.update({
-          where: { materialNumber },
-          data: {
-            description: dto.description,
-            price: dto.price,
-            currency: dto.currency,
-          },
-        });
+      // Price and currency are deprecated and independent of price
+      // conditions since Sprint 9C-B, so they can change freely
+      const material = await this.prisma.material.update({
+        where: { materialNumber },
+        data: {
+          description: dto.description,
+          price: dto.price,
+          currency: dto.currency,
+        },
       });
       return toMaterial(material);
     } catch (error) {
@@ -85,36 +81,13 @@ export class MaterialsService {
   }
 }
 
-/**
- * Active price conditions must use the currency of their material, so the
- * currency cannot change while active conditions in another currency exist.
- * The material row is locked like in the price conditions service, so no
- * condition can be created or reactivated during the change.
- */
-async function assertCurrencyChangeAllowed(
-  db: Prisma.TransactionClient,
-  materialNumber: string,
-  currency: string,
-) {
-  await db.$queryRaw`
-    SELECT material_number FROM materials
-    WHERE material_number = ${materialNumber} FOR UPDATE`;
-  const conflicting = await db.priceCondition.count({
-    where: { materialNumber, isActive: true, currency: { not: currency } },
-  });
-  if (conflicting > 0) {
-    throw new UnprocessableEntityException([
-      `currency cannot be changed to ${currency}: material ${materialNumber} has ${conflicting} active price condition(s) in another currency`,
-    ]);
-  }
-}
-
 // Prisma returns prices as Decimal objects; our API returns plain numbers
+// (deprecated fields, see Material)
 function toMaterial(material: MaterialRecord): Material {
   return {
     materialNumber: material.materialNumber,
     description: material.description,
-    price: material.price.toNumber(),
+    price: material.price?.toNumber() ?? null,
     currency: material.currency,
   };
 }

@@ -1,11 +1,7 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { fromDbDate } from '../common/dates';
-import { formatAmount } from '../common/money';
-import {
-  LIST_PRICE_CONDITION_TYPE,
-  toConditionTypeSummary,
-} from '../condition-types/condition-type-rules';
-import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
+import { CurrencyPrecision, formatInCurrency } from '../common/money';
+import { toConditionTypeSummary } from '../condition-types/condition-type-rules';
 import {
   ConditionType,
   Material,
@@ -14,6 +10,16 @@ import {
 } from '../generated/prisma/client';
 import { PriceConditionScope } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  findSalesArea,
+  formatSalesArea,
+  SalesAreaKey,
+  salesAreaKeyOf,
+  salesAreaViolations,
+  SalesAreaWithCurrency,
+  sameSalesArea,
+  unitNotInSalesArea,
+} from '../sales-areas/sales-area-key';
 import { CalculatePriceDto } from './dto/calculate-price.dto';
 import {
   ConditionCandidate,
@@ -23,13 +29,21 @@ import {
 } from './price-determination';
 import { PriceResult, PriceResultStep } from './price-result.interface';
 
+/** Error code of the pricing API when no price exists */
+export const NO_PRICE_FOUND = 'NO_PRICE_FOUND';
+
 @Injectable()
 export class PricingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Determines the price of a material for a B2B unit on a given date */
+  /**
+   * Determines the price of a material for a B2B unit in a sales area on a
+   * given date. The unit must belong to the sales area; the currency comes
+   * from the sales area.
+   */
   async calculate(dto: CalculatePriceDto): Promise<PriceResult> {
-    const [material, unit] = await Promise.all([
+    const key = salesAreaKeyOf(dto);
+    const [material, unit, salesArea] = await Promise.all([
       this.prisma.material.findUnique({
         where: { materialNumber: dto.materialNumber },
       }),
@@ -37,12 +51,14 @@ export class PricingService {
         where: { unitId: dto.unitId },
         include: { soldTo: { include: { customer: true } } },
       }),
+      findSalesArea(this.prisma, key),
     ]);
 
     const violations: string[] = [];
     if (!material) {
       violations.push(`materialNumber ${dto.materialNumber} does not exist`);
     }
+    violations.push(...salesAreaViolations(key, salesArea));
     if (!unit) {
       violations.push(`unitId ${dto.unitId} does not exist`);
     } else {
@@ -52,73 +68,76 @@ export class PricingService {
           `unitId ${dto.unitId} has an inactive Sold-to ${unit.soldToCustomerNumber}`,
         );
       }
+      // Never price a unit with the conditions of another market
+      if (salesArea && !sameSalesArea(unit, key)) {
+        violations.push(unitNotInSalesArea(dto.unitId, unit, key));
+      }
     }
-    if (!material || !unit || violations.length > 0) {
+    if (!material || !unit || !salesArea || violations.length > 0) {
       throw new UnprocessableEntityException(violations);
     }
 
-    // All active conditions of the material for this unit or its Sold-to;
-    // the validity on the pricing date is checked by determinePrice
     const conditions = await this.prisma.priceCondition.findMany({
-      where: {
-        materialNumber: material.materialNumber,
-        isActive: true,
-        OR: [
-          { scope: PriceConditionScope.B2B_UNIT, unitId: unit.unitId },
-          {
-            scope: PriceConditionScope.SOLD_TO,
-            soldToCustomerNumber: unit.soldToCustomerNumber,
-          },
-        ],
-      },
+      where: conditionFilter(key, [material.materialNumber], unit),
       include: { conditionType: true },
     });
-    const listPriceType = await loadListPriceType(this.prisma);
 
     const quantity = dto.quantity ?? 1;
     const result = determinePrice({
       pricingDate: dto.pricingDate,
       quantity,
-      basePrice: material.price,
-      currency: material.currency,
+      salesArea: key,
+      currency: salesArea.currency,
       candidates: conditions.map(toCandidate),
-      baseConditionType: listPriceType,
     });
+
+    if (result.status === 'NO_PRICE_FOUND') {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        error: 'Unprocessable Entity',
+        code: NO_PRICE_FOUND,
+        message: [noPriceText(material.materialNumber, key, dto.pricingDate)],
+        // The analysis shows that every level was checked
+        steps: toResultSteps(result.steps, salesArea.currency),
+      });
+    }
 
     return {
       materialNumber: material.materialNumber,
       materialDescription: material.description,
+      salesArea: key,
       unitId: unit.unitId,
       soldToCustomerNumber: unit.soldToCustomerNumber,
       pricingDate: dto.pricingDate,
       quantity,
-      unitPrice: formatAmount(result.unitPrice),
-      netValue: formatAmount(result.netValue),
+      unitPrice: formatInCurrency(result.unitPrice, salesArea.currency),
+      netValue: formatInCurrency(result.netValue, salesArea.currency),
       currency: result.currency,
       source: result.source,
       conditionType: result.conditionType,
-      conditionId: result.condition?.conditionId ?? null,
-      validFrom: result.condition?.validFrom ?? null,
-      validTo: result.condition?.validTo ?? null,
-      steps: toResultSteps(result.steps),
+      conditionId: result.condition.conditionId,
+      validFrom: result.condition.validFrom,
+      validTo: result.condition.validTo,
+      steps: toResultSteps(result.steps, salesArea.currency),
     };
   }
 
   /**
-   * Prices several positions with four queries in total, however many
-   * positions there are: the materials, the active conditions of these
-   * materials for the unit and its Sold-to (with their condition types) and
-   * the list price condition type. Every position is then priced on
+   * Prices several positions with two queries in total, however many
+   * positions there are: the materials, and the active conditions of these
+   * materials in the sales area for the unit, its Sold-to and the list
+   * price (with their condition types). Every position is then priced on
    * its own by determinePrice, also if a material occurs more than once.
    *
-   * Unlike calculate(), this does not check whether the unit or its
-   * partners are active; the caller (e.g. the order simulation) decides
-   * what to report. Pass a transaction client to read inside a transaction.
-   * Without a unit (null), only the materials are looked up.
+   * Unlike calculate(), this does not check whether the unit, its partners
+   * or the sales area are usable; the caller (e.g. the order simulation)
+   * decides what to report and passes null for unit or sales area to
+   * suppress pricing. Pass a transaction client to read inside a transaction.
    */
   async priceItems(
     request: {
       unit: { unitId: string; soldToCustomerNumber: string } | null;
+      salesArea: SalesAreaWithCurrency | null;
       pricingDate: string;
       items: { materialNumber: string; quantity: number }[];
     },
@@ -131,40 +150,35 @@ export class PricingService {
     const materials = await db.material.findMany({
       where: { materialNumber: { in: materialNumbers } },
     });
-    const { unit } = request;
-    const conditions = unit
-      ? await db.priceCondition.findMany({
-          where: {
-            materialNumber: { in: materials.map((m) => m.materialNumber) },
-            isActive: true,
-            OR: [
-              { scope: PriceConditionScope.B2B_UNIT, unitId: unit.unitId },
-              {
-                scope: PriceConditionScope.SOLD_TO,
-                soldToCustomerNumber: unit.soldToCustomerNumber,
-              },
-            ],
-          },
-          include: { conditionType: true },
-        })
-      : [];
-    const listPriceType = unit ? await loadListPriceType(db) : null;
+    const { unit, salesArea } = request;
+    const conditions =
+      unit && salesArea
+        ? await db.priceCondition.findMany({
+            where: conditionFilter(
+              salesArea.key,
+              materials.map((m) => m.materialNumber),
+              unit,
+            ),
+            include: { conditionType: true },
+          })
+        : [];
 
     return request.items.map((item) => {
       const material =
         materials.find((m) => m.materialNumber === item.materialNumber) ?? null;
-      if (!material || !unit) return { material, determination: null };
+      if (!material || !unit || !salesArea) {
+        return { material, determination: null };
+      }
       return {
         material,
         determination: determinePrice({
           pricingDate: request.pricingDate,
           quantity: item.quantity,
-          basePrice: material.price,
-          currency: material.currency,
+          salesArea: salesArea.key,
+          currency: salesArea.currency,
           candidates: conditions
             .filter((c) => c.materialNumber === material.materialNumber)
             .map(toCandidate),
-          baseConditionType: listPriceType,
         }),
       };
     });
@@ -177,20 +191,41 @@ type Db = Prisma.TransactionClient | PrismaService;
 export interface ItemPricing {
   /** null if the material does not exist */
   material: Material | null;
-  /** null without material or unit */
+  /** null without material, unit or sales area */
   determination: Determination | null;
 }
 
 /**
- * The condition type shown for the material base price (ZP01, transitional).
- * The price itself never depends on it: without the type, the base price
- * is still used, only without condition type metadata.
+ * Active conditions of the materials in exactly this sales area: for the
+ * unit, for its Sold-to, and the list price of the sales area. The validity
+ * on the pricing date is checked by determinePrice.
  */
-async function loadListPriceType(db: Db): Promise<ConditionTypeSummary | null> {
-  const type = await db.conditionType.findUnique({
-    where: { code: LIST_PRICE_CONDITION_TYPE },
-  });
-  return type && toConditionTypeSummary(type);
+function conditionFilter(
+  key: SalesAreaKey,
+  materialNumbers: string[],
+  unit: { unitId: string; soldToCustomerNumber: string },
+): Prisma.PriceConditionWhereInput {
+  return {
+    ...key,
+    materialNumber: { in: materialNumbers },
+    isActive: true,
+    OR: [
+      { scope: PriceConditionScope.B2B_UNIT, unitId: unit.unitId },
+      {
+        scope: PriceConditionScope.SOLD_TO,
+        soldToCustomerNumber: unit.soldToCustomerNumber,
+      },
+      { scope: PriceConditionScope.SALES_AREA },
+    ],
+  };
+}
+
+export function noPriceText(
+  materialNumber: string,
+  key: SalesAreaKey,
+  pricingDate: string,
+) {
+  return `No price found for material ${materialNumber} in sales area ${formatSalesArea(key)} on ${pricingDate}`;
 }
 
 function toCandidate(
@@ -199,6 +234,7 @@ function toCandidate(
   return {
     conditionId: condition.conditionId,
     scope: condition.scope,
+    salesArea: salesAreaKeyOf(condition),
     amount: condition.amount,
     currency: condition.currency,
     validFrom: fromDbDate(condition.validFrom),
@@ -208,12 +244,15 @@ function toCandidate(
   };
 }
 
-/** Steps with amounts as decimal strings, as in the pricing API */
-export function toResultSteps(steps: PricingStep[]): PriceResultStep[] {
+/** Steps with amounts as decimal strings in the decimal places of the currency */
+export function toResultSteps(
+  steps: PricingStep[],
+  currency: CurrencyPrecision,
+): PriceResultStep[] {
   return steps.map((step) => ({
     source: step.source,
     conditionId: step.conditionId,
-    amount: step.amount && formatAmount(step.amount),
+    amount: step.amount && formatInCurrency(step.amount, currency),
     applied: step.applied,
     conditionType: step.conditionType,
   }));
