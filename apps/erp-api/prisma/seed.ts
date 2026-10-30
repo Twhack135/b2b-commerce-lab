@@ -4,6 +4,13 @@ import { PrismaClient } from '../src/generated/prisma/client';
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
+// Sales area of all example data: Germany / Direct Sales / Cross-Division
+const GERMANY = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
+};
+
 const materials = [
   {
     materialNumber: 'MAT-001',
@@ -161,6 +168,22 @@ async function main() {
   }
   console.log(`Seeded ${customers.length} customers`);
 
+  // All example customers sell in the German sales area (configured by the
+  // migration), like the existing data. Existing assignments stay unchanged.
+  for (const { customerNumber } of customers) {
+    await prisma.customerSalesArea.upsert({
+      where: {
+        customerNumber_salesOrganization_distributionChannel_division: {
+          customerNumber,
+          ...GERMANY,
+        },
+      },
+      update: {},
+      create: { customerNumber, ...GERMANY },
+    });
+  }
+  console.log('Assigned the customers to sales area 1000/10/00');
+
   // Existing memberships and units are left unchanged (update: {}),
   // so running the seed again never moves customers between accounts
   for (const customerNumber of [account.owner, ...account.members]) {
@@ -187,6 +210,7 @@ async function main() {
           soldToCustomerNumber: unit.soldTo,
           billToCustomerNumber: unit.billTo,
           payerCustomerNumber: unit.payer,
+          ...GERMANY,
         },
       });
       await tx.b2bUnitShipTo.createMany({
@@ -195,6 +219,7 @@ async function main() {
           customerNumber,
           accountCustomerNumber: account.owner,
           isDefault: customerNumber === unit.defaultShipTo,
+          ...GERMANY,
         })),
       });
     });

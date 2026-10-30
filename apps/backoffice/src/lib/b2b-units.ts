@@ -1,4 +1,5 @@
 import { erpFetch } from "./erp-api";
+import type { SalesAreaKey } from "./sales-areas";
 
 /** Short view of a customer used as account owner, member or partner */
 export type PartnerSummary = {
@@ -14,6 +15,8 @@ export type B2bUnit = {
   unitId: string;
   name: string;
   isActive: boolean;
+  /** The sales area the unit orders in; fixed after creation */
+  salesArea: SalesAreaKey;
   account: PartnerSummary;
   soldTo: PartnerSummary;
   billTo: PartnerSummary;
@@ -22,7 +25,7 @@ export type B2bUnit = {
   defaultShipToCustomerNumber: string;
 };
 
-export type CreateB2bUnitInput = {
+export type CreateB2bUnitInput = SalesAreaKey & {
   unitId: string;
   name: string;
   accountCustomerNumber: string;
@@ -34,10 +37,13 @@ export type CreateB2bUnitInput = {
   isActive: boolean;
 };
 
-/** Unit ID, account and Sold-to cannot be changed after creation */
+/** Unit ID, sales area, account and Sold-to cannot be changed after creation */
 export type UpdateB2bUnitInput = Omit<
   CreateB2bUnitInput,
-  "unitId" | "accountCustomerNumber" | "soldToCustomerNumber"
+  | "unitId"
+  | keyof SalesAreaKey
+  | "accountCustomerNumber"
+  | "soldToCustomerNumber"
 >;
 
 export function listB2bUnits() {

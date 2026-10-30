@@ -67,7 +67,56 @@ const CUSTOMERS: TestCustomer[] = [
     isActive: false,
     account: 'SLEEP',
   },
+  // Members of ACC without an (active) assignment to sales area 1000/10/00
+  {
+    customerNumber: 'NOAREA',
+    name: 'Not Assigned',
+    isActive: true,
+    account: 'ACC',
+  },
+  {
+    customerNumber: 'PAUSED',
+    name: 'Inactive Assignment',
+    isActive: true,
+    account: 'ACC',
+  },
 ];
+
+const DE = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
+};
+const PL = {
+  salesOrganization: '2000',
+  distributionChannel: '10',
+  division: '00',
+};
+
+// Configured sales areas; 9000 belongs to an inactive sales organization
+const SALES_AREAS = [
+  { ...DE, isActive: true, organization: { isActive: true } },
+  { ...PL, isActive: true, organization: { isActive: true } },
+  {
+    salesOrganization: '9000',
+    distributionChannel: '10',
+    division: '00',
+    isActive: true,
+    organization: { isActive: false },
+  },
+];
+
+/** Assignment status per sales area; missing customers are not assigned */
+const ASSIGNMENTS: Record<string, Record<string, boolean>> = {
+  '1000/10/00': Object.fromEntries(
+    CUSTOMERS.filter((c) => c.customerNumber !== 'NOAREA').map((c) => [
+      c.customerNumber,
+      c.customerNumber !== 'PAUSED',
+    ]),
+  ),
+  // Only the account owner sells in Poland
+  '2000/10/00': { ACC: true },
+};
 
 function customerRecord(customerNumber: string) {
   const c = CUSTOMERS.find((x) => x.customerNumber === customerNumber);
@@ -101,6 +150,8 @@ function unitRecord(
   options: {
     billTo?: string;
     shipTos?: { customerNumber: string; isDefault: boolean }[];
+    isActive?: boolean;
+    salesArea?: typeof DE;
   } = {},
 ) {
   return {
@@ -110,7 +161,8 @@ function unitRecord(
     soldToCustomerNumber: 'ACC',
     billToCustomerNumber: options.billTo ?? 'BP1',
     payerCustomerNumber: 'ACC',
-    isActive: true,
+    isActive: options.isActive ?? true,
+    ...(options.salesArea ?? DE),
     soldTo: { ...member('ACC'), owner: member('ACC') },
     billTo: member(options.billTo ?? 'BP1'),
     payer: member('ACC'),
@@ -132,6 +184,7 @@ function unitRecord(
 const validCreate = {
   unitId: 'UNIT-1',
   name: 'Hamburg Plant',
+  ...DE,
   accountCustomerNumber: 'ACC',
   soldToCustomerNumber: 'ACC',
   billToCustomerNumber: 'BP1',
@@ -155,6 +208,7 @@ describe('B2bUnitsService', () => {
     // Row lock: SELECT ... FOR UPDATE
     $queryRaw: jest.fn(),
     customer: { findUnique: jest.fn(), findMany: jest.fn() },
+    salesArea: { findUnique: jest.fn() },
     b2bUnit: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -183,7 +237,41 @@ describe('B2bUnitsService', () => {
         where.customerNumber.in.map(customerRecord).filter(Boolean),
     );
     db.b2bUnitShipTo.count.mockResolvedValue(1);
-    db.$queryRaw.mockResolvedValue([{ unit_id: 'UNIT-1' }]);
+    db.salesArea.findUnique.mockImplementation(
+      ({
+        where,
+      }: {
+        where: { salesOrganization_distributionChannel_division: typeof DE };
+      }) => {
+        const key = where.salesOrganization_distributionChannel_division;
+        return (
+          SALES_AREAS.find(
+            (a) =>
+              a.salesOrganization === key.salesOrganization &&
+              a.distributionChannel === key.distributionChannel &&
+              a.division === key.division,
+          ) ?? null
+        );
+      },
+    );
+    // Two raw queries: the unit row lock and the assignment lock
+    db.$queryRaw.mockImplementation(
+      (strings: TemplateStringsArray, ...values: unknown[]) => {
+        if (!strings.join('?').includes('customer_sales_areas')) {
+          return [{ unit_id: 'UNIT-1' }];
+        }
+        const [numbers, org, channel, division] = values as [
+          string[],
+          string,
+          string,
+          string,
+        ];
+        const assigned = ASSIGNMENTS[`${org}/${channel}/${division}`] ?? {};
+        return numbers
+          .filter((n) => n in assigned)
+          .map((n) => ({ customer_number: n, is_active: assigned[n] }));
+      },
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [B2bUnitsService, { provide: PrismaService, useValue: db }],
@@ -219,6 +307,7 @@ describe('B2bUnitsService', () => {
           unitId: 'UNIT-1',
           name: 'Hamburg Plant',
           isActive: true,
+          salesArea: DE,
           account: summary('ACC'),
           soldTo: summary('ACC'),
           billTo: summary('BP1'),
@@ -274,6 +363,7 @@ describe('B2bUnitsService', () => {
           billToCustomerNumber: 'BP1',
           payerCustomerNumber: 'ACC',
           isActive: true,
+          ...DE,
         },
       });
       expect(db.b2bUnitShipTo.createMany).toHaveBeenCalledWith({
@@ -283,12 +373,14 @@ describe('B2bUnitsService', () => {
             customerNumber: 'SH1',
             accountCustomerNumber: 'ACC',
             isDefault: true,
+            ...DE,
           },
           {
             unitId: 'UNIT-1',
             customerNumber: 'SH2',
             accountCustomerNumber: 'ACC',
             isDefault: false,
+            ...DE,
           },
         ],
       });
@@ -399,6 +491,83 @@ describe('B2bUnitsService', () => {
       );
     });
 
+    it.each([
+      [
+        'a combination that is not configured',
+        { ...DE, distributionChannel: '20' },
+        'salesArea 1000/20/00 does not exist',
+      ],
+      [
+        'an inactive sales organization',
+        { ...DE, salesOrganization: '9000' },
+        'salesArea 9000/10/00 is inactive',
+      ],
+    ])('should reject %s', async (_case, salesArea, message) => {
+      await expect422(service.create({ ...validCreate, ...salesArea }), [
+        message,
+      ]);
+      expectNoWrites();
+    });
+
+    it('should reject partners without an active assignment to the sales area', async () => {
+      await expect422(
+        service.create({
+          ...validCreate,
+          billToCustomerNumber: 'PAUSED',
+          shipToCustomerNumbers: ['SH1', 'NOAREA'],
+        }),
+        [
+          'billToCustomerNumber PAUSED is inactive in sales area 1000/10/00',
+          'shipToCustomerNumbers NOAREA is not assigned to sales area 1000/10/00',
+        ],
+      );
+      expectNoWrites();
+    });
+
+    it('should not use partners of another sales area', async () => {
+      // Only ACC is assigned to Poland
+      await expect422(service.create({ ...validCreate, ...PL }), [
+        'billToCustomerNumber BP1 is not assigned to sales area 2000/10/00',
+        'shipToCustomerNumbers SH1 is not assigned to sales area 2000/10/00',
+        'shipToCustomerNumbers SH2 is not assigned to sales area 2000/10/00',
+      ]);
+      expectNoWrites();
+    });
+
+    it('should create a unit in another sales area with partners assigned there', async () => {
+      await service.create({
+        ...validCreate,
+        ...PL,
+        billToCustomerNumber: 'ACC',
+        shipToCustomerNumbers: ['ACC'],
+        defaultShipToCustomerNumber: 'ACC',
+      });
+
+      expect(db.b2bUnit.create).toHaveBeenCalledWith({
+        data: expect.objectContaining(PL),
+      });
+    });
+
+    it('should lock the assignments of all partners with a parameterized query', async () => {
+      await service.create(validCreate);
+
+      const call = db.$queryRaw.mock.calls.find(([strings]) =>
+        (strings as TemplateStringsArray).join('?').includes('FOR SHARE'),
+      ) as [TemplateStringsArray, ...unknown[]];
+      expect(call[0].join('?')).toMatch(
+        /FROM customer_sales_areas\s+WHERE customer_number = ANY\(\?\)/,
+      );
+      expect(call.slice(1)).toEqual([
+        ['ACC', 'BP1', 'SH1', 'SH2'],
+        '1000',
+        '10',
+        '00',
+      ]);
+      expect(db.$queryRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        db.b2bUnit.create.mock.invocationCallOrder[0],
+      );
+    });
+
     it('should fail and roll back if the default rule is broken', async () => {
       db.b2bUnitShipTo.count.mockResolvedValue(0);
 
@@ -496,6 +665,7 @@ describe('B2bUnitsService', () => {
             customerNumber: 'ACC',
             accountCustomerNumber: 'ACC',
             isDefault: false,
+            ...DE,
           },
         ],
       });
@@ -591,6 +761,90 @@ describe('B2bUnitsService', () => {
         service.update('UNIT-1', { shipToCustomerNumbers: ['SH1', 'OM'] }),
         ['shipToCustomerNumbers OM does not belong to account ACC'],
       );
+    });
+
+    it('should reject a new ship-to that is not assigned to the sales area', async () => {
+      await expect422(
+        service.update('UNIT-1', { shipToCustomerNumbers: ['SH1', 'NOAREA'] }),
+        [
+          'shipToCustomerNumbers NOAREA is not assigned to sales area 1000/10/00',
+        ],
+      );
+      expectNoWrites();
+    });
+
+    it('should check new partners against the sales area of the unit', async () => {
+      db.b2bUnit.findUnique.mockResolvedValue(
+        unitRecord({
+          salesArea: PL,
+          billTo: 'ACC',
+          shipTos: [{ customerNumber: 'ACC', isDefault: true }],
+        }),
+      );
+
+      await expect422(
+        service.update('UNIT-1', { billToCustomerNumber: 'BP1' }),
+        ['billToCustomerNumber BP1 is not assigned to sales area 2000/10/00'],
+      );
+    });
+
+    it('should not check kept partners of an active unit again', async () => {
+      db.b2bUnit.findUnique.mockResolvedValue(unitRecord({ billTo: 'PAUSED' }));
+
+      await expect(
+        service.update('UNIT-1', { name: 'Renamed' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('should reject reactivating a unit whose partner is inactive in the sales area', async () => {
+      db.b2bUnit.findUnique.mockResolvedValue(
+        unitRecord({ isActive: false, billTo: 'PAUSED' }),
+      );
+
+      await expect422(service.update('UNIT-1', { isActive: true }), [
+        'billToCustomerNumber PAUSED is inactive in sales area 1000/10/00',
+      ]);
+      expectNoWrites();
+    });
+
+    it('should reject reactivating a unit in an inactive sales area', async () => {
+      db.b2bUnit.findUnique.mockResolvedValue(
+        unitRecord({
+          isActive: false,
+          salesArea: { ...DE, salesOrganization: '9000' },
+        }),
+      );
+
+      await expect422(service.update('UNIT-1', { isActive: true }), [
+        'salesArea 9000/10/00 is inactive',
+        'soldToCustomerNumber ACC is not assigned to sales area 9000/10/00',
+        'billToCustomerNumber BP1 is not assigned to sales area 9000/10/00',
+        'payerCustomerNumber ACC is not assigned to sales area 9000/10/00',
+        'shipToCustomerNumbers SH1 is not assigned to sales area 9000/10/00',
+        'shipToCustomerNumbers SH2 is not assigned to sales area 9000/10/00',
+      ]);
+    });
+
+    it('should reactivate a unit whose partners are all active in the sales area', async () => {
+      db.b2bUnit.findUnique.mockResolvedValue(unitRecord({ isActive: false }));
+
+      await service.update('UNIT-1', { isActive: true });
+
+      expect(db.b2bUnit.update).toHaveBeenCalledWith({
+        where: { unitId: 'UNIT-1' },
+        data: expect.objectContaining({ isActive: true }),
+      });
+    });
+
+    it('should allow a kept partner whose customer became inactive on reactivation', async () => {
+      // Only the sales area assignment is required again, as before 9C-A
+      db.b2bUnit.findUnique.mockResolvedValue(
+        unitRecord({ isActive: false, billTo: 'OLD' }),
+      );
+
+      await expect(
+        service.update('UNIT-1', { isActive: true }),
+      ).resolves.toBeDefined();
     });
 
     it('should fail and roll back if the default rule is broken', async () => {

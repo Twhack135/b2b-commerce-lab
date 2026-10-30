@@ -6,6 +6,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import {
   createCustomers,
   createTestApp,
+  GERMANY,
   membership,
   resetDatabase,
 } from './helpers';
@@ -60,6 +61,7 @@ describe('Concurrent updates (PostgreSQL row locks)', () => {
       .send({
         unitId,
         name: unitId,
+        ...GERMANY,
         accountCustomerNumber: 'ACC',
         soldToCustomerNumber: 'ACC',
         billToCustomerNumber: 'ACC',

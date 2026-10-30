@@ -1,4 +1,5 @@
 import { PartnerSummary } from '../common/partner-summary';
+import { SalesAreaKey } from '../sales-areas/sales-area-key';
 
 export interface ShipToAssignment extends PartnerSummary {
   isDefault: boolean;
@@ -14,6 +15,8 @@ export interface B2bUnit {
   unitId: string;
   name: string;
   isActive: boolean;
+  /** The sales area the unit orders in; fixed after creation */
+  salesArea: SalesAreaKey;
   account: PartnerSummary;
   soldTo: PartnerSummary;
   billTo: PartnerSummary;

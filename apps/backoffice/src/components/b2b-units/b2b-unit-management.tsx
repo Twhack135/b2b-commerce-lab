@@ -6,6 +6,9 @@ import {
   listCustomerAccounts,
   type CustomerAccount,
 } from "@/lib/customer-accounts";
+import { listCustomers } from "@/lib/customers";
+import { salesAreaId } from "@/lib/sales-area-display";
+import { listSalesAreas } from "@/lib/sales-areas";
 import { useListData } from "@/lib/use-list-data";
 import {
   EmptyState,
@@ -34,6 +37,10 @@ export function B2bUnitManagement() {
   const units = useListData(listB2bUnits);
   // Accounts with their members are the partner choices of the unit form
   const accounts = useListData(listCustomerAccounts);
+  // Sales areas and the customers' assignments decide which partners a
+  // unit in a sales area may use
+  const salesAreas = useListData(listSalesAreas);
+  const customers = useListData(listCustomers);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
@@ -43,6 +50,8 @@ export function B2bUnitManagement() {
   function reloadAll() {
     units.reload();
     accounts.reload();
+    salesAreas.reload();
+    customers.reload();
   }
 
   function open(next: Panel) {
@@ -78,6 +87,7 @@ export function B2bUnitManagement() {
         unit.account.name,
         unit.soldTo.customerNumber,
         unit.soldTo.name,
+        salesAreaId(unit.salesArea),
       ].some((text) => text.toLowerCase().includes(query)),
   );
   const isFiltered = query !== "" || statusFilter !== "all";
@@ -86,7 +96,7 @@ export function B2bUnitManagement() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="B2B Units"
-        description="Ordering contexts of customer accounts with their partner functions (Sold-to, Bill-to, Payer, Ship-to)."
+        description="Ordering contexts of customer accounts in one sales area, with their partner functions (Sold-to, Bill-to, Payer, Ship-to)."
         actionLabel="New B2B Unit"
         onAction={() => open({ kind: "create" })}
         secondaryAction={{
@@ -124,12 +134,17 @@ export function B2bUnitManagement() {
           <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
             <SearchInput
               label="Search B2B units"
-              placeholder="Search unit, account or Sold-to"
+              placeholder="Search unit, account, Sold-to or sales area"
               value={search}
               onChange={setSearch}
             />
             <RefreshButton
-              isLoading={units.isLoading || accounts.isLoading}
+              isLoading={
+                units.isLoading ||
+                accounts.isLoading ||
+                salesAreas.isLoading ||
+                customers.isLoading
+              }
               onClick={reloadAll}
             />
           </div>
@@ -161,6 +176,7 @@ export function B2bUnitManagement() {
         ) : (
           <B2bUnitTable
             units={visibleUnits}
+            salesAreas={salesAreas.items}
             onSelect={(unit) => open({ kind: "edit", unit })}
           />
         )}
@@ -173,6 +189,9 @@ export function B2bUnitManagement() {
           unit={panel.kind === "edit" ? panel.unit : undefined}
           accounts={accounts.items}
           accountsError={accounts.loadError}
+          salesAreas={salesAreas.items}
+          salesAreasError={salesAreas.loadError}
+          customers={customers.items}
           onClose={() => setPanel(null)}
           onSaved={handleUnitSaved}
         />

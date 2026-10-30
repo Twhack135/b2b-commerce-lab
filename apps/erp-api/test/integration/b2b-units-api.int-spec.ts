@@ -3,6 +3,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import {
   createCustomers,
   createTestApp,
+  GERMANY,
   membership,
   resetDatabase,
 } from './helpers';
@@ -10,6 +11,7 @@ import {
 const validUnit = {
   unitId: 'UNIT-1',
   name: 'Hamburg Plant',
+  ...GERMANY,
   accountCustomerNumber: 'ACC',
   soldToCustomerNumber: 'ACC',
   billToCustomerNumber: 'BP1',
@@ -75,6 +77,7 @@ describe('B2B units API', () => {
         unitId: 'UNIT-1',
         name: 'Hamburg Plant',
         isActive: true,
+        salesArea: GERMANY,
         account: summary('ACC'),
         soldTo: summary('ACC'),
         billTo: summary('BP1'),
@@ -152,7 +155,7 @@ describe('B2B units API', () => {
         shipToCustomerNumbers: ['SH1', 'SH1'],
       }).expect(400);
       await createUnit({ ...validUnit, unitId: ' UNIT-1' }).expect(400);
-      await createUnit({ ...validUnit, salesOrganization: '1000' }).expect(400);
+      await createUnit({ ...validUnit, salesArea: '1000/10/00' }).expect(400);
     });
   });
 

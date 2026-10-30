@@ -6,9 +6,9 @@ import {
   UNIT_NAME_MAX_LENGTH,
 } from './b2b-unit-validators';
 
-// unitId, accountCustomerNumber and soldToCustomerNumber are intentionally
-// not listed: they cannot be changed, and the ValidationPipe rejects
-// unknown properties.
+// unitId, the sales area, accountCustomerNumber and soldToCustomerNumber
+// are intentionally not listed: they cannot be changed, and the
+// ValidationPipe rejects unknown properties.
 export class UpdateB2bUnitDto {
   @IfPresent()
   @IsString()

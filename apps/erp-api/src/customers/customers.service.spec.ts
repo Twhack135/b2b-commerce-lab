@@ -32,6 +32,37 @@ const alpen = {
   isActive: false,
 };
 
+const GERMANY = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
+};
+
+// Database rows as loaded with their sales area assignments ...
+const nordwindRecord = {
+  ...nordwind,
+  salesAreas: [{ customerNumber: 'CUST-0001', ...GERMANY, isActive: true }],
+};
+const alpenRecord = { ...alpen, salesAreas: [] };
+
+// ... and as returned by the API
+const nordwindApi = {
+  ...nordwind,
+  salesAreas: [{ ...GERMANY, isActive: true }],
+};
+const alpenApi = { ...alpen, salesAreas: [] };
+
+// Every query loads the assignments in a fixed order
+const include = {
+  salesAreas: {
+    orderBy: [
+      { salesOrganization: 'asc' },
+      { distributionChannel: 'asc' },
+      { division: 'asc' },
+    ],
+  },
+};
+
 describe('CustomersService', () => {
   let service: CustomersService;
 
@@ -60,30 +91,35 @@ describe('CustomersService', () => {
 
   describe('findAll', () => {
     it('should return active and inactive customers sorted by number', async () => {
-      prismaMock.customer.findMany.mockResolvedValue([nordwind, alpen]);
+      prismaMock.customer.findMany.mockResolvedValue([
+        nordwindRecord,
+        alpenRecord,
+      ]);
 
-      await expect(service.findAll()).resolves.toEqual([nordwind, alpen]);
+      await expect(service.findAll()).resolves.toEqual([nordwindApi, alpenApi]);
       expect(prismaMock.customer.findMany).toHaveBeenCalledWith({
+        include,
         orderBy: { customerNumber: 'asc' },
       });
     });
 
     it('should only return API fields, even if the record has more', async () => {
       prismaMock.customer.findMany.mockResolvedValue([
-        { ...nordwind, internalNote: 'not for the API' },
+        { ...nordwindRecord, internalNote: 'not for the API' },
       ]);
 
-      await expect(service.findAll()).resolves.toEqual([nordwind]);
+      await expect(service.findAll()).resolves.toEqual([nordwindApi]);
     });
   });
 
   describe('findOne', () => {
     it('should return an existing customer', async () => {
-      prismaMock.customer.findUnique.mockResolvedValue(nordwind);
+      prismaMock.customer.findUnique.mockResolvedValue(nordwindRecord);
 
-      await expect(service.findOne('CUST-0001')).resolves.toEqual(nordwind);
+      await expect(service.findOne('CUST-0001')).resolves.toEqual(nordwindApi);
       expect(prismaMock.customer.findUnique).toHaveBeenCalledWith({
         where: { customerNumber: 'CUST-0001' },
+        include,
       });
     });
 
@@ -100,21 +136,30 @@ describe('CustomersService', () => {
     const { isActive: _isActive, ...withoutStatus } = nordwind;
 
     it('should create a customer that is active by default', async () => {
-      prismaMock.customer.create.mockResolvedValue(nordwind);
+      // A new customer is not assigned to any sales area yet
+      prismaMock.customer.create.mockResolvedValue({
+        ...nordwind,
+        salesAreas: [],
+      });
 
-      await expect(service.create(withoutStatus)).resolves.toEqual(nordwind);
+      await expect(service.create(withoutStatus)).resolves.toEqual({
+        ...nordwind,
+        salesAreas: [],
+      });
       expect(prismaMock.customer.create).toHaveBeenCalledWith({
         data: { ...withoutStatus, isActive: true },
+        include,
       });
     });
 
     it('should create an inactive customer when requested', async () => {
-      prismaMock.customer.create.mockResolvedValue(alpen);
+      prismaMock.customer.create.mockResolvedValue(alpenRecord);
 
       await service.create(alpen);
 
       expect(prismaMock.customer.create).toHaveBeenCalledWith({
         data: alpen,
+        include,
       });
     });
 
@@ -137,14 +182,14 @@ describe('CustomersService', () => {
   describe('update', () => {
     it('should update the given fields and return the customer', async () => {
       prismaMock.customer.update.mockResolvedValue({
-        ...nordwind,
+        ...nordwindRecord,
         city: 'Bremen',
         isActive: false,
       });
 
       await expect(
         service.update('CUST-0001', { city: 'Bremen', isActive: false }),
-      ).resolves.toEqual({ ...nordwind, city: 'Bremen', isActive: false });
+      ).resolves.toEqual({ ...nordwindApi, city: 'Bremen', isActive: false });
       expect(prismaMock.customer.update).toHaveBeenCalledWith({
         where: { customerNumber: 'CUST-0001' },
         data: {
@@ -155,6 +200,7 @@ describe('CustomersService', () => {
           country: undefined,
           isActive: false,
         },
+        include,
       });
     });
 

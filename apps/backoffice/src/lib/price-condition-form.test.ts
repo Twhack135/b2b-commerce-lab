@@ -32,14 +32,15 @@ const materials: Material[] = [
 ];
 
 const customers: Customer[] = [
-  { ...p("CUST-1000"), street: "s", postalCode: "1", city: "c", country: "DE" },
-  { ...p("OLD", false), street: "s", postalCode: "1", city: "c", country: "DE" },
+  { ...p("CUST-1000"), street: "s", postalCode: "1", city: "c", country: "DE", salesAreas: [] },
+  { ...p("OLD", false), street: "s", postalCode: "1", city: "c", country: "DE", salesAreas: [] },
 ];
 
 const unit = (unitId: string, isActive = true, soldTo = p("CUST-1000")): B2bUnit => ({
   unitId,
   name: `Unit ${unitId}`,
   isActive,
+  salesArea: { salesOrganization: "1000", distributionChannel: "10", division: "00" },
   account: p("CUST-1000"),
   soldTo,
   billTo: p("CUST-1000"),

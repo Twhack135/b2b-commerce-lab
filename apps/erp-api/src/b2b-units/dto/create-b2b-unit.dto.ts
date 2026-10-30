@@ -1,6 +1,10 @@
 import { IsBoolean, IsString, MaxLength } from 'class-validator';
 import { IfPresent, IsBusinessKey, IsNotBlank } from '../../common/validators';
 import {
+  IsSalesAreaPartCode,
+  IsSalesOrganizationCode,
+} from '../../sales-areas/sales-area-validators';
+import {
   IsCustomerReference,
   IsShipToList,
   UNIT_ID_MAX_LENGTH,
@@ -18,7 +22,17 @@ export class CreateB2bUnitDto {
   @MaxLength(UNIT_NAME_MAX_LENGTH)
   name: string;
 
-  // Account and Sold-to are fixed after creation
+  // Sales area, account and Sold-to are fixed after creation. All partners
+  // must be assigned to the sales area.
+  @IsSalesOrganizationCode()
+  salesOrganization: string;
+
+  @IsSalesAreaPartCode()
+  distributionChannel: string;
+
+  @IsSalesAreaPartCode()
+  division: string;
+
   @IsCustomerReference()
   accountCustomerNumber: string;
 

@@ -41,8 +41,110 @@ model Customer {
   // Relation only; the customers table itself has no new columns
   accountMembership CustomerAccountMember?
   priceConditions   PriceCondition[]
+  salesAreas        CustomerSalesArea[]
 
   @@map("customers")
+}
+
+// ISO 4217 currency with its number of decimal places (comparable to SAP
+// TCURC and TCURX), e.g. EUR 2, JPY 0. Configuration: created by migrations,
+// read-only in the API. Amounts are stored with their real value (700000 JPY
+// is stored as 700000), not shifted like SAP stores JPY amounts.
+// CHECK constraints in the migration: code is three capital letters,
+// decimals between 0 and 3, name not blank.
+model Currency {
+  code     String  @id @db.Char(3)
+  name     String  @db.VarChar(60)
+  decimals Int     @db.SmallInt
+  isActive Boolean @default(true) @map("is_active")
+
+  salesOrganizations SalesOrganization[]
+
+  @@map("currencies")
+}
+
+// Organizational structure of sales (comparable to SAP TVKO, TVTW, TSPA and
+// TVTA). Configuration created by migrations, read-only in the API. Codes
+// are text, not numbers: "00" is a valid division. CHECK constraints in the
+// migration check the code formats and that names are not blank.
+
+// A sales organization sells in one market with one currency (simplified:
+// SAP derives the currency from the company code and the customer master)
+model SalesOrganization {
+  code         String  @id @db.Char(4)
+  name         String  @db.VarChar(60)
+  country      String  @db.Char(2)
+  currencyCode String  @map("currency_code") @db.Char(3)
+  isActive     Boolean @default(true) @map("is_active")
+
+  currency   Currency    @relation(fields: [currencyCode], references: [code], onDelete: Restrict, onUpdate: Restrict)
+  salesAreas SalesArea[]
+
+  @@index([currencyCode])
+  @@map("sales_organizations")
+}
+
+model DistributionChannel {
+  code String @id @db.Char(2)
+  name String @db.VarChar(60)
+
+  salesAreas SalesArea[]
+
+  @@map("distribution_channels")
+}
+
+model Division {
+  code String @id @db.Char(2)
+  name String @db.VarChar(60)
+
+  salesAreas SalesArea[]
+
+  @@map("divisions")
+}
+
+// A valid combination of sales organization, distribution channel and
+// division, e.g. 1000/10/00. Only listed combinations can be used.
+model SalesArea {
+  salesOrganization   String  @map("sales_organization") @db.Char(4)
+  distributionChannel String  @map("distribution_channel") @db.Char(2)
+  division            String  @db.Char(2)
+  isActive            Boolean @default(true) @map("is_active")
+
+  organization   SalesOrganization   @relation(fields: [salesOrganization], references: [code], onDelete: Restrict, onUpdate: Restrict)
+  channel        DistributionChannel @relation(fields: [distributionChannel], references: [code], onDelete: Restrict, onUpdate: Restrict)
+  divisionRecord Division            @relation(fields: [division], references: [code], onDelete: Restrict, onUpdate: Restrict)
+
+  customerAssignments CustomerSalesArea[]
+  b2bUnits            B2bUnit[]
+
+  @@id([salesOrganization, distributionChannel, division])
+  @@index([distributionChannel])
+  @@index([division])
+  @@map("sales_areas")
+}
+
+// Assignment of a customer to a sales area (comparable to SAP KNVV, the
+// sales area data of the customer master). A customer can be assigned to
+// several sales areas and can only be a partner of B2B units in those.
+// Assignments are never deleted; they are deactivated via isActive.
+model CustomerSalesArea {
+  customerNumber      String  @map("customer_number") @db.VarChar(20)
+  salesOrganization   String  @map("sales_organization") @db.Char(4)
+  distributionChannel String  @map("distribution_channel") @db.Char(2)
+  division            String  @db.Char(2)
+  isActive            Boolean @default(true) @map("is_active")
+
+  customer  Customer  @relation(fields: [customerNumber], references: [customerNumber], onDelete: Restrict, onUpdate: Restrict)
+  salesArea SalesArea @relation(fields: [salesOrganization, distributionChannel, division], references: [salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict)
+
+  soldToUnits       B2bUnit[]       @relation("UnitSoldToSalesArea")
+  billToUnits       B2bUnit[]       @relation("UnitBillToSalesArea")
+  payerUnits        B2bUnit[]       @relation("UnitPayerSalesArea")
+  shipToAssignments B2bUnitShipTo[] @relation("ShipToSalesArea")
+
+  @@id([customerNumber, salesOrganization, distributionChannel, division])
+  @@index([salesOrganization, distributionChannel, division], map: "customer_sales_areas_sales_area_idx")
+  @@map("customer_sales_areas")
 }
 
 // Customer account membership. A customer account is represented by its
@@ -85,36 +187,61 @@ model B2bUnit {
   billToCustomerNumber  String  @map("bill_to_customer_number") @db.VarChar(20)
   payerCustomerNumber   String  @map("payer_customer_number") @db.VarChar(20)
   isActive              Boolean @default(true) @map("is_active")
+  // The sales area the unit orders in; fixed after creation
+  salesOrganization     String  @map("sales_organization") @db.Char(4)
+  distributionChannel   String  @map("distribution_channel") @db.Char(2)
+  division              String  @db.Char(2)
 
   soldTo CustomerAccountMember @relation("UnitSoldTo", fields: [soldToCustomerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
   billTo CustomerAccountMember @relation("UnitBillTo", fields: [billToCustomerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
   payer  CustomerAccountMember @relation("UnitPayer", fields: [payerCustomerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
 
-  shipTos         B2bUnitShipTo[]
-  priceConditions PriceCondition[]
+  // Every partner must be assigned to the unit's sales area
+  salesArea       SalesArea         @relation(fields: [salesOrganization, distributionChannel, division], references: [salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict)
+  soldToSalesArea CustomerSalesArea @relation("UnitSoldToSalesArea", fields: [soldToCustomerNumber, salesOrganization, distributionChannel, division], references: [customerNumber, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "b2b_units_sold_to_sales_area_fkey")
+  billToSalesArea CustomerSalesArea @relation("UnitBillToSalesArea", fields: [billToCustomerNumber, salesOrganization, distributionChannel, division], references: [customerNumber, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "b2b_units_bill_to_sales_area_fkey")
+  payerSalesArea  CustomerSalesArea @relation("UnitPayerSalesArea", fields: [payerCustomerNumber, salesOrganization, distributionChannel, division], references: [customerNumber, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "b2b_units_payer_sales_area_fkey")
+
+  shipTos            B2bUnitShipTo[]  @relation("ShipToUnit")
+  shipTosInSalesArea B2bUnitShipTo[]  @relation("ShipToUnitSalesArea")
+  priceConditions    PriceCondition[]
 
   @@unique([unitId, accountCustomerNumber])
+  // Target of the ship-to foreign key that repeats the sales area
+  @@unique([unitId, salesOrganization, distributionChannel, division], map: "b2b_units_unit_id_sales_area_key")
   @@index([accountCustomerNumber])
   @@index([soldToCustomerNumber, accountCustomerNumber])
   @@index([billToCustomerNumber, accountCustomerNumber])
   @@index([payerCustomerNumber, accountCustomerNumber])
+  @@index([salesOrganization, distributionChannel, division], map: "b2b_units_sales_area_idx")
+  @@index([soldToCustomerNumber, salesOrganization, distributionChannel, division], map: "b2b_units_sold_to_sales_area_idx")
+  @@index([billToCustomerNumber, salesOrganization, distributionChannel, division], map: "b2b_units_bill_to_sales_area_idx")
+  @@index([payerCustomerNumber, salesOrganization, distributionChannel, division], map: "b2b_units_payer_sales_area_idx")
   @@map("b2b_units")
 }
 
-// Allowed ship-to partners of a B2B unit. The account is repeated here so
-// the database can check that the ship-to belongs to the unit's account.
+// Allowed ship-to partners of a B2B unit. Account and sales area are
+// repeated here so the database can check that the ship-to belongs to the
+// unit's account and is assigned to the unit's sales area.
 model B2bUnitShipTo {
   unitId                String  @map("unit_id") @db.VarChar(20)
   customerNumber        String  @map("customer_number") @db.VarChar(20)
   accountCustomerNumber String  @map("account_customer_number") @db.VarChar(20)
   isDefault             Boolean @default(false) @map("is_default")
+  salesOrganization     String  @map("sales_organization") @db.Char(4)
+  distributionChannel   String  @map("distribution_channel") @db.Char(2)
+  division              String  @db.Char(2)
 
-  unit   B2bUnit               @relation(fields: [unitId, accountCustomerNumber], references: [unitId, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+  unit   B2bUnit               @relation("ShipToUnit", fields: [unitId, accountCustomerNumber], references: [unitId, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
   member CustomerAccountMember @relation(fields: [customerNumber, accountCustomerNumber], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict)
+
+  unitInSalesArea   B2bUnit           @relation("ShipToUnitSalesArea", fields: [unitId, salesOrganization, distributionChannel, division], references: [unitId, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "b2b_unit_ship_tos_unit_sales_area_fkey")
+  customerSalesArea CustomerSalesArea @relation("ShipToSalesArea", fields: [customerNumber, salesOrganization, distributionChannel, division], references: [customerNumber, salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "b2b_unit_ship_tos_customer_sales_area_fkey")
 
   @@id([unitId, customerNumber])
   @@unique([unitId], where: { isDefault: true }, map: "b2b_unit_ship_tos_one_default_key")
   @@index([customerNumber, accountCustomerNumber])
+  @@index([customerNumber, salesOrganization, distributionChannel, division], map: "b2b_unit_ship_tos_customer_sales_area_idx")
   @@map("b2b_unit_ship_tos")
 }
 

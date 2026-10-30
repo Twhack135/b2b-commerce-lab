@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Customer as CustomerRecord } from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import {
   isPrismaError,
   RECORD_NOT_FOUND,
@@ -14,12 +14,28 @@ import { Customer } from './customer.interface';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
+// Assignments are listed in a fixed order: by sales organization, channel, division
+const WITH_SALES_AREAS = {
+  salesAreas: {
+    orderBy: [
+      { salesOrganization: 'asc' },
+      { distributionChannel: 'asc' },
+      { division: 'asc' },
+    ],
+  },
+} satisfies Prisma.CustomerInclude;
+
+type CustomerRecord = Prisma.CustomerGetPayload<{
+  include: typeof WITH_SALES_AREAS;
+}>;
+
 @Injectable()
 export class CustomersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(): Promise<Customer[]> {
     const customers = await this.prisma.customer.findMany({
+      include: WITH_SALES_AREAS,
       orderBy: { customerNumber: 'asc' },
     });
     return customers.map(toCustomer);
@@ -28,6 +44,7 @@ export class CustomersService {
   async findOne(customerNumber: string): Promise<Customer> {
     const customer = await this.prisma.customer.findUnique({
       where: { customerNumber },
+      include: WITH_SALES_AREAS,
     });
     if (!customer) {
       throw notFound(customerNumber);
@@ -47,6 +64,7 @@ export class CustomersService {
           country: dto.country,
           isActive: dto.isActive ?? true,
         },
+        include: WITH_SALES_AREAS,
       });
       return toCustomer(customer);
     } catch (error) {
@@ -74,6 +92,7 @@ export class CustomersService {
           country: dto.country,
           isActive: dto.isActive,
         },
+        include: WITH_SALES_AREAS,
       });
       return toCustomer(customer);
     } catch (error) {
@@ -95,6 +114,12 @@ function toCustomer(customer: CustomerRecord): Customer {
     city: customer.city,
     country: customer.country,
     isActive: customer.isActive,
+    salesAreas: customer.salesAreas.map((assignment) => ({
+      salesOrganization: assignment.salesOrganization,
+      distributionChannel: assignment.distributionChannel,
+      division: assignment.division,
+      isActive: assignment.isActive,
+    })),
   };
 }
 

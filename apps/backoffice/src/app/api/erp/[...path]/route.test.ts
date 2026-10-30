@@ -127,10 +127,39 @@ describe("allowed routes are forwarded", () => {
     });
   }
 
+  // Sprint 9C-A endpoints
+  for (const [method, path, body, status] of [
+    ["GET", ["currencies"], undefined, 200],
+    ["GET", ["sales-organizations"], undefined, 200],
+    ["GET", ["distribution-channels"], undefined, 200],
+    ["GET", ["divisions"], undefined, 200],
+    ["GET", ["sales-areas"], undefined, 200],
+    ["POST", ["customers", "CUST-0001", "sales-areas"], { salesOrganization: "2000", distributionChannel: "10", division: "00" }, 201],
+    ["PATCH", ["customers", "CUST-0001", "sales-areas", "1000", "10", "00"], { isActive: false }, 200],
+  ] as const) {
+    it(`${method} /${path.join("/")}`, async () => {
+      const fetchMock = mockUpstream(upstreamJson(status, {}));
+
+      const response = await call(method, [...path], body);
+
+      assert.equal(response.status, status);
+      const { url, init } = upstreamCall(fetchMock);
+      assert.equal(url, `http://erp.test:3000/${path.join("/")}`);
+      assert.equal(init.method, method);
+      assert.deepEqual(
+        init.body === undefined ? undefined : JSON.parse(String(init.body)),
+        body,
+      );
+    });
+  }
+
   // Sprint 6A endpoints
   const unitBody = {
     unitId: "NW-HAMBURG",
     name: "Nordwind Hamburg",
+    salesOrganization: "1000",
+    distributionChannel: "10",
+    division: "00",
     accountCustomerNumber: "CUST-0001",
     soldToCustomerNumber: "CUST-0001",
     billToCustomerNumber: "CUST-0005",
@@ -329,6 +358,17 @@ describe("blocked routes are never forwarded", () => {
     ["GET", ["sales-orders", "4711"]],
     ["POST", ["sales-orders", "simulate", "x"]],
     ["POST", ["sales-orders", "place"]],
+    // Sprint 9C-A resources: only the exact implemented paths
+    ["GET", ["currencies", "EUR"]],
+    ["GET", ["sales-areas", "1000"]],
+    ["GET", ["sales-areas", "1000", "10", "00"]],
+    ["GET", ["sales-organizations", "1000"]],
+    ["GET", ["customer-sales-areas"]],
+    ["POST", ["customers", "CUST-0001", "sales-areas", "1000"]],
+    ["PATCH", ["customers", "CUST-0001", "sales-areas", "1000", "10"]],
+    ["PATCH", ["customers", "CUST-0001", "sales-areas", "1000", "10", "00", "x"]],
+    ["PATCH", ["customers", "CUST-0001", "sales-areas", "..", "10", "00"]],
+    ["POST", ["customers", "..", "sales-areas"]],
   ] as const) {
     it(`${method} /${path.join("/")} -> 404`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));
@@ -390,6 +430,19 @@ describe("blocked methods are never forwarded", () => {
     ["PUT", ["sales-orders", "simulate"], "POST"],
     ["PATCH", ["sales-orders", "simulate"], "POST"],
     ["DELETE", ["sales-orders", "simulate"], "POST"],
+    // Sprint 9C-A: configuration is read-only, assignments are never deleted
+    ["POST", ["currencies"], "GET"],
+    ["PATCH", ["sales-areas"], "GET"],
+    ["DELETE", ["sales-areas"], "GET"],
+    ["POST", ["sales-organizations"], "GET"],
+    ["PUT", ["distribution-channels"], "GET"],
+    ["DELETE", ["divisions"], "GET"],
+    ["GET", ["customers", "CUST-0001", "sales-areas"], "POST"],
+    ["PUT", ["customers", "CUST-0001", "sales-areas"], "POST"],
+    ["DELETE", ["customers", "CUST-0001", "sales-areas"], "POST"],
+    ["GET", ["customers", "CUST-0001", "sales-areas", "1000", "10", "00"], "PATCH"],
+    ["DELETE", ["customers", "CUST-0001", "sales-areas", "1000", "10", "00"], "PATCH"],
+    ["PUT", ["customers", "CUST-0001", "sales-areas", "1000", "10", "00"], "PATCH"],
   ] as const) {
     it(`${method} /${path.join("/")} -> 405`, async () => {
       const fetchMock = mockUpstream(upstreamJson(200, {}));

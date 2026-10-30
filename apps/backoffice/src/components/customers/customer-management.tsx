@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { listCustomers, type Customer } from "@/lib/customers";
+import { listSalesAreas } from "@/lib/sales-areas";
 import { useListData } from "@/lib/use-list-data";
 import {
   EmptyState,
@@ -28,6 +29,7 @@ export function CustomerManagement() {
     loadError,
     reload,
   } = useListData(listCustomers);
+  const salesAreas = useListData(listSalesAreas);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
@@ -63,7 +65,7 @@ export function CustomerManagement() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Customer Management"
-        description="Create and maintain customers of the ERP customer master."
+        description="Create and maintain customers of the ERP customer master and their sales areas."
         actionLabel="New Customer"
         onAction={() => {
           setNotice(null);
@@ -130,6 +132,7 @@ export function CustomerManagement() {
         ) : (
           <CustomerTable
             customers={visibleCustomers}
+            salesAreas={salesAreas.items}
             onSelect={(customer) => {
               setNotice(null);
               setPanel({ mode: "edit", customer });
@@ -143,8 +146,12 @@ export function CustomerManagement() {
           // A new key resets the form when another customer is opened
           key={panel.mode === "edit" ? panel.customer.customerNumber : "new"}
           customer={panel.mode === "edit" ? panel.customer : undefined}
+          salesAreas={salesAreas.items}
+          salesAreasError={salesAreas.loadError}
           onClose={() => setPanel(null)}
           onSaved={handleSaved}
+          // The list shows the assignments; the open panel keeps its own state
+          onSalesAreasChanged={reload}
         />
       )}
     </div>

@@ -1,18 +1,24 @@
 import { countryName } from "@/lib/countries";
 import type { Customer } from "@/lib/customers";
+import { salesAreaId, salesAreaName } from "@/lib/sales-area-display";
+import type { SalesArea } from "@/lib/sales-areas";
 import { StatusBadge } from "../list-page";
 
 export function CustomerTable({
   customers,
+  salesAreas,
   onSelect,
 }: {
   customers: Customer[];
+  /** For the names of the sales areas; null while loading */
+  salesAreas: SalesArea[] | null;
   onSelect: (customer: Customer) => void;
 }) {
   return (
     <div className="overflow-x-auto">
-      {/* On small screens the city moves below the name, the city, country
-          and Edit columns are hidden, and tapping a row opens the customer */}
+      {/* On small screens the city moves below the name, the city, country,
+          sales area and Edit columns are hidden, and tapping a row opens the
+          customer */}
       <table className="w-full text-left">
         <thead className="bg-canvas/60 text-xs tracking-wide text-ink-muted uppercase">
           <tr>
@@ -33,6 +39,12 @@ export function CustomerTable({
               className="hidden px-4 py-2.5 font-medium md:table-cell"
             >
               Country
+            </th>
+            <th
+              scope="col"
+              className="hidden px-4 py-2.5 font-medium lg:table-cell"
+            >
+              Sales Areas
             </th>
             <th scope="col" className="px-4 py-2.5 font-medium">
               Status
@@ -77,6 +89,9 @@ export function CustomerTable({
                   {countryName(customer.country)}
                 </span>
               </td>
+              <td className="hidden px-4 py-3 lg:table-cell">
+                <SalesAreaChips customer={customer} salesAreas={salesAreas} />
+              </td>
               <td className="px-4 py-3">
                 <StatusBadge isActive={customer.isActive} />
               </td>
@@ -98,5 +113,36 @@ export function CustomerTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** The customer's sales areas; inactive assignments are marked */
+function SalesAreaChips({
+  customer,
+  salesAreas,
+}: {
+  customer: Customer;
+  salesAreas: SalesArea[] | null;
+}) {
+  if (customer.salesAreas.length === 0) {
+    return <span className="text-xs text-ink-muted">None</span>;
+  }
+  return (
+    <ul className="flex flex-wrap gap-1">
+      {customer.salesAreas.map((assignment) => (
+        <li
+          key={salesAreaId(assignment)}
+          title={`${salesAreaName(salesAreas, assignment)}${assignment.isActive ? "" : " (inactive)"}`}
+          className={`rounded-full px-2 py-0.5 font-mono text-xs whitespace-nowrap ${
+            assignment.isActive
+              ? "bg-brand-soft text-brand-strong"
+              : "bg-canvas text-ink-muted line-through"
+          }`}
+        >
+          {salesAreaId(assignment)}
+          {!assignment.isActive && <span className="sr-only"> (inactive)</span>}
+        </li>
+      ))}
+    </ul>
   );
 }

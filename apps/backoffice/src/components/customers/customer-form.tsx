@@ -19,6 +19,7 @@ import {
   GENERIC_VALIDATION_MESSAGE,
   splitValidationMessages,
 } from "@/lib/form-errors";
+import type { SalesArea } from "@/lib/sales-areas";
 import {
   Field,
   FormActions,
@@ -26,6 +27,7 @@ import {
   inputClass,
 } from "../forms/form-controls";
 import { SidePanel } from "../forms/side-panel";
+import { CustomerSalesAreas } from "./customer-sales-areas";
 
 const FIELDS: CustomerFormField[] = [
   "customerNumber",
@@ -42,12 +44,20 @@ const FIELDS: CustomerFormField[] = [
  */
 export function CustomerForm({
   customer,
+  salesAreas,
+  salesAreasError,
   onClose,
   onSaved,
+  onSalesAreasChanged,
 }: {
   customer?: Customer;
+  /** null while loading */
+  salesAreas: SalesArea[] | null;
+  salesAreasError: string | null;
   onClose: () => void;
   onSaved: (customer: Customer, mode: "create" | "edit") => void;
+  /** A sales area assignment was saved (the panel stays open) */
+  onSalesAreasChanged: () => void;
 }) {
   const mode = customer ? "edit" : "create";
 
@@ -269,6 +279,21 @@ export function CustomerForm({
               className="mt-1 size-5 shrink-0 accent-brand"
             />
           </div>
+
+          {customer ? (
+            <CustomerSalesAreas
+              customer={customer}
+              salesAreas={salesAreas}
+              salesAreasError={salesAreasError}
+              onChanged={onSalesAreasChanged}
+            />
+          ) : (
+            <p className="text-xs text-ink-muted">
+              After creating the customer, open it again to assign it to the
+              sales areas it buys in. Only then can it become a partner of a
+              B2B unit.
+            </p>
+          )}
         </div>
 
         <FormActions

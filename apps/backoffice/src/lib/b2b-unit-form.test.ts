@@ -34,6 +34,7 @@ const partners = accountPartners(account);
 const valid: B2bUnitFormValues = {
   unitId: "UNIT-1",
   name: "Hamburg Plant",
+  salesArea: "1000/10/00",
   accountCustomerNumber: "ACC",
   soldToCustomerNumber: "ACC",
   billToCustomerNumber: "BP1",
@@ -48,6 +49,7 @@ const savedUnit = (overrides: Partial<B2bUnit> = {}): B2bUnit => ({
   unitId: "UNIT-1",
   name: "Hamburg Plant",
   isActive: true,
+  salesArea: { salesOrganization: "1000", distributionChannel: "10", division: "00" },
   account: p("ACC"),
   soldTo: p("ACC"),
   billTo: p("OLD", false),
@@ -195,6 +197,7 @@ describe("validation when creating", () => {
       "defaultShipToCustomerNumber",
       "name",
       "payerCustomerNumber",
+      "salesArea",
       "shipToCustomerNumbers",
       "soldToCustomerNumber",
       "unitId",

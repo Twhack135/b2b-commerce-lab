@@ -3,6 +3,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import {
   createCustomers,
   createTestApp,
+  GERMANY,
   membership,
   resetDatabase,
 } from './helpers';
@@ -162,6 +163,7 @@ describe('Customer accounts API', () => {
       .send({
         unitId: 'UNIT-1',
         name: 'Unit 1',
+        ...GERMANY,
         accountCustomerNumber: 'ACC',
         soldToCustomerNumber: 'ACC',
         billToCustomerNumber: 'ACC',

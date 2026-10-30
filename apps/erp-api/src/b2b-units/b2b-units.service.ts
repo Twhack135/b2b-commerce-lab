@@ -5,6 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { toPartnerSummary } from '../common/partner-summary';
+import { lockAssignments } from '../customer-sales-areas/assignment-rules';
 import { Prisma } from '../generated/prisma/client';
 import {
   FOREIGN_KEY_FAILED,
@@ -13,6 +14,12 @@ import {
   UNIQUE_CONSTRAINT_FAILED,
 } from '../prisma/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  checkSalesArea,
+  formatSalesArea,
+  SalesAreaKey,
+  salesAreaKeyOf,
+} from '../sales-areas/sales-area-key';
 import { B2bUnit } from './b2b-unit.interface';
 import { CreateB2bUnitDto } from './dto/create-b2b-unit.dto';
 import { UpdateB2bUnitDto } from './dto/update-b2b-unit.dto';
@@ -39,6 +46,9 @@ type PartnerCheck = {
   customerNumber: string;
   // Only new assignments must be active; existing ones may stay
   isNewAssignment: boolean;
+  // The customer's assignment to the unit's sales area must be active: for
+  // new assignments and for all partners when a unit is reactivated
+  needsActiveSalesArea: boolean;
 };
 
 @Injectable()
@@ -80,11 +90,15 @@ export class B2bUnitsService {
         }
 
         const account = dto.accountCustomerNumber;
-        const violations = await checkAccount(tx, account);
-        // Partners can only be checked against a valid account
+        const salesArea = salesAreaKeyOf(dto);
+        const violations = [
+          ...(await checkSalesArea(tx, salesArea)),
+          ...(await checkAccount(tx, account)),
+        ];
+        // Partners can only be checked against a valid account and sales area
         if (violations.length === 0) {
           violations.push(
-            ...(await checkPartners(tx, account, [
+            ...(await checkPartners(tx, account, salesArea, [
               newPartner('soldToCustomerNumber', dto.soldToCustomerNumber),
               newPartner('billToCustomerNumber', dto.billToCustomerNumber),
               newPartner('payerCustomerNumber', dto.payerCustomerNumber),
@@ -112,6 +126,7 @@ export class B2bUnitsService {
             billToCustomerNumber: dto.billToCustomerNumber,
             payerCustomerNumber: dto.payerCustomerNumber,
             isActive: dto.isActive ?? true,
+            ...salesArea,
           },
         });
         await tx.b2bUnitShipTo.createMany({
@@ -120,6 +135,7 @@ export class B2bUnitsService {
             customerNumber,
             accountCustomerNumber: account,
             isDefault: customerNumber === dto.defaultShipToCustomerNumber,
+            ...salesArea,
           })),
         });
 
@@ -143,7 +159,7 @@ export class B2bUnitsService {
 
   /**
    * Updates name, Bill-to, Payer, ship-tos, default ship-to and status in
-   * one transaction. Account and Sold-to cannot be changed.
+   * one transaction. Account, Sold-to and sales area cannot be changed.
    */
   async update(unitId: string, dto: UpdateB2bUnitDto): Promise<B2bUnit> {
     try {
@@ -167,6 +183,8 @@ export class B2bUnitsService {
         }
 
         const account = unit.accountCustomerNumber;
+        const salesArea = salesAreaKeyOf(unit);
+        const isReactivation = dto.isActive === true && !unit.isActive;
         const currentShipTos = unit.shipTos.map((s) => s.customerNumber);
         const currentDefault = unit.shipTos.find(
           (s) => s.isDefault,
@@ -199,8 +217,28 @@ export class B2bUnitsService {
         ) {
           checks.push(newPartner('defaultShipToCustomerNumber', nextDefault));
         }
+        // A reactivated unit is offered for ordering again, so its sales area
+        // and the assignments of all partners it keeps must be active again
+        const violations: string[] = [];
+        if (isReactivation) {
+          violations.push(...(await checkSalesArea(tx, salesArea)));
+          checks.push(
+            keptPartner('soldToCustomerNumber', unit.soldToCustomerNumber),
+          );
+          if (nextBillTo === unit.billToCustomerNumber) {
+            checks.push(keptPartner('billToCustomerNumber', nextBillTo));
+          }
+          if (nextPayer === unit.payerCustomerNumber) {
+            checks.push(keptPartner('payerCustomerNumber', nextPayer));
+          }
+          for (const n of nextShipTos.filter((n) => !added.includes(n))) {
+            checks.push(keptPartner('shipToCustomerNumbers', n));
+          }
+        }
 
-        const violations = await checkPartners(tx, account, checks);
+        violations.push(
+          ...(await checkPartners(tx, account, salesArea, checks)),
+        );
         if (!nextDefault || !nextShipTos.includes(nextDefault)) {
           violations.push(DEFAULT_NOT_IN_LIST);
         }
@@ -244,6 +282,7 @@ export class B2bUnitsService {
               customerNumber,
               accountCustomerNumber: account,
               isDefault: false,
+              ...salesArea,
             })),
           });
         }
@@ -286,7 +325,22 @@ const DEFAULT_NOT_IN_LIST =
   'defaultShipToCustomerNumber must be one of shipToCustomerNumbers';
 
 function newPartner(field: string, customerNumber: string): PartnerCheck {
-  return { field, customerNumber, isNewAssignment: true };
+  return {
+    field,
+    customerNumber,
+    isNewAssignment: true,
+    needsActiveSalesArea: true,
+  };
+}
+
+/** A partner that stays assigned while the unit is reactivated */
+function keptPartner(field: string, customerNumber: string): PartnerCheck {
+  return {
+    field,
+    customerNumber,
+    isNewAssignment: false,
+    needsActiveSalesArea: true,
+  };
 }
 
 /** The account must be an active customer account (an owner row) */
@@ -310,11 +364,15 @@ async function checkAccount(db: Db, account: string): Promise<string[]> {
 
 /**
  * Every partner must exist and belong to the account (the owner itself or a
- * member). New assignments must also be active.
+ * member). New assignments must also be active. Partners that need an
+ * active sales area (see PartnerCheck) must have an active assignment to the
+ * unit's sales area; those assignments stay locked until the transaction
+ * ends, so they cannot be deactivated at the same time.
  */
 async function checkPartners(
   db: Db,
   account: string,
+  salesArea: SalesAreaKey,
   checks: PartnerCheck[],
 ): Promise<string[]> {
   if (checks.length === 0) return [];
@@ -324,10 +382,18 @@ async function checkPartners(
     where: { customerNumber: { in: numbers } },
     include: { accountMembership: true },
   });
+  const assignments = await lockAssignments(
+    db,
+    salesArea,
+    checks.filter((c) => c.needsActiveSalesArea).map((c) => c.customerNumber),
+  );
+  const area = formatSalesArea(salesArea);
 
   const violations: string[] = [];
-  for (const { field, customerNumber, isNewAssignment } of checks) {
+  for (const check of checks) {
+    const { field, customerNumber, isNewAssignment } = check;
     const customer = customers.find((c) => c.customerNumber === customerNumber);
+    const assignment = assignments.get(customerNumber);
     if (!customer) {
       violations.push(`${field} ${customerNumber} does not exist`);
     } else if (customer.accountMembership?.accountCustomerNumber !== account) {
@@ -336,6 +402,16 @@ async function checkPartners(
       );
     } else if (isNewAssignment && !customer.isActive) {
       violations.push(`${field} ${customerNumber} is inactive`);
+    } else if (!check.needsActiveSalesArea) {
+      continue;
+    } else if (assignment === undefined) {
+      violations.push(
+        `${field} ${customerNumber} is not assigned to sales area ${area}`,
+      );
+    } else if (!assignment) {
+      violations.push(
+        `${field} ${customerNumber} is inactive in sales area ${area}`,
+      );
     }
   }
   return violations;
@@ -363,6 +439,7 @@ function toB2bUnit(unit: UnitRecord): B2bUnit {
     unitId: unit.unitId,
     name: unit.name,
     isActive: unit.isActive,
+    salesArea: salesAreaKeyOf(unit),
     account: toPartnerSummary(unit.soldTo.owner.customer),
     soldTo: toPartnerSummary(unit.soldTo.customer),
     billTo: toPartnerSummary(unit.billTo.customer),

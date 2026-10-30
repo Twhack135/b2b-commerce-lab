@@ -40,6 +40,7 @@ const stuttgart = (shipTos = [
   unitId: "UNIT-STUTTGART",
   name: "Müller – Stuttgart",
   isActive,
+  salesArea: { salesOrganization: "1000", distributionChannel: "10", division: "00" },
   account: p("CUST-1000"),
   soldTo: p("CUST-1000"),
   billTo: p("CUST-1000"),

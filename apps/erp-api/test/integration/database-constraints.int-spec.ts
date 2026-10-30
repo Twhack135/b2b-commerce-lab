@@ -6,6 +6,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import {
   createCustomers,
   createTestApp,
+  GERMANY,
   membership,
   resetDatabase,
 } from './helpers';
@@ -45,6 +46,7 @@ describe('Database constraints (PostgreSQL)', () => {
         soldToCustomerNumber: 'A',
         billToCustomerNumber: 'A',
         payerCustomerNumber: 'X',
+        ...GERMANY,
         ...overrides,
       },
     });
@@ -56,6 +58,7 @@ describe('Database constraints (PostgreSQL)', () => {
         customerNumber: customer,
         accountCustomerNumber: account,
         isDefault,
+        ...GERMANY,
       },
     });
 
@@ -189,6 +192,7 @@ describe('Database constraints (PostgreSQL)', () => {
               soldToCustomerNumber: 'A',
               billToCustomerNumber: 'A',
               payerCustomerNumber: 'A',
+              ...GERMANY,
             },
           });
           // fails: B does not belong to account A
@@ -198,6 +202,7 @@ describe('Database constraints (PostgreSQL)', () => {
               customerNumber: 'B',
               accountCustomerNumber: 'A',
               isDefault: true,
+              ...GERMANY,
             },
           });
         }),

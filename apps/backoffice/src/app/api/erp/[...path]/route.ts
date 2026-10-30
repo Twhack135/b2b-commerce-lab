@@ -22,6 +22,25 @@ const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
   { method: "GET", path: ["customers", ":customerNumber"] },
   { method: "POST", path: ["customers"] },
   { method: "PATCH", path: ["customers", ":customerNumber"] },
+  // Sales area assignments of a customer; listed with the customer
+  { method: "POST", path: ["customers", ":customerNumber", "sales-areas"] },
+  {
+    method: "PATCH",
+    path: [
+      "customers",
+      ":customerNumber",
+      "sales-areas",
+      ":salesOrganization",
+      ":distributionChannel",
+      ":division",
+    ],
+  },
+  // Read-only currencies and organizational structure
+  { method: "GET", path: ["currencies"] },
+  { method: "GET", path: ["sales-organizations"] },
+  { method: "GET", path: ["distribution-channels"] },
+  { method: "GET", path: ["divisions"] },
+  { method: "GET", path: ["sales-areas"] },
   { method: "GET", path: ["customer-accounts"] },
   { method: "GET", path: ["customer-accounts", ":accountCustomerNumber"] },
   {

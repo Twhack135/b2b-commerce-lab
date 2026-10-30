@@ -6,6 +6,19 @@ import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/app.setup';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
+/**
+ * The German sales area, configured by the migration like the other sales
+ * areas (2000/10/00 Poland, 3000/10/00 Japan). Test customers are assigned
+ * to it, like all customers that existed before Sprint 9C-A.
+ */
+export const GERMANY = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
+};
+export const POLAND = { ...GERMANY, salesOrganization: '2000' };
+export const JAPAN = { ...GERMANY, salesOrganization: '3000' };
+
 /** The real application, configured exactly like in main.ts */
 export async function createTestApp() {
   const moduleRef = await Test.createTestingModule({
@@ -20,7 +33,11 @@ export async function createTestApp() {
   return { app, prisma, http };
 }
 
-/** Removes all rows. Refuses to run on anything but a *_test database. */
+/**
+ * Removes all business data. Refuses to run on anything but a *_test
+ * database. Configuration from the migrations (condition types, currencies,
+ * sales areas) is kept.
+ */
 export async function resetDatabase(prisma: PrismaService) {
   const [{ name }] = await prisma.$queryRaw<{ name: string }[]>`
     SELECT current_database() AS name`;
@@ -28,7 +45,7 @@ export async function resetDatabase(prisma: PrismaService) {
     throw new Error(`Refusing to delete data in database ${name}`);
   }
   await prisma.$executeRawUnsafe(
-    'TRUNCATE price_conditions, b2b_unit_ship_tos, b2b_units, customer_account_members, customers, materials RESTART IDENTITY',
+    'TRUNCATE price_conditions, b2b_unit_ship_tos, b2b_units, customer_sales_areas, customer_account_members, customers, materials RESTART IDENTITY',
   );
 }
 
@@ -66,6 +83,7 @@ export async function createPricingData(prisma: PrismaService) {
     billToCustomerNumber: 'ACC',
     payerCustomerNumber: 'ACC',
     isActive,
+    ...GERMANY,
   });
   await prisma.b2bUnit.createMany({
     data: [
@@ -80,6 +98,7 @@ export async function createPricingData(prisma: PrismaService) {
       customerNumber: 'M1',
       accountCustomerNumber: 'ACC',
       isDefault: true,
+      ...GERMANY,
     })),
   });
   // Deactivated after the unit was created, like in real life
@@ -89,7 +108,10 @@ export async function createPricingData(prisma: PrismaService) {
   });
 }
 
-/** Creates test customers; all active unless listed in `inactive` */
+/**
+ * Creates test customers; all active unless listed in `inactive`. Each one
+ * is assigned (actively) to the German sales area.
+ */
 export async function createCustomers(
   prisma: PrismaService,
   customerNumbers: string[],
@@ -104,6 +126,12 @@ export async function createCustomers(
       city: 'Berlin',
       country: 'DE',
       isActive: !inactive.includes(customerNumber),
+    })),
+  });
+  await prisma.customerSalesArea.createMany({
+    data: customerNumbers.map((customerNumber) => ({
+      customerNumber,
+      ...GERMANY,
     })),
   });
 }
@@ -169,6 +197,7 @@ export async function createMuellerData(prisma: PrismaService) {
     soldToCustomerNumber: 'CUST-1000',
     billToCustomerNumber: billTo,
     payerCustomerNumber: 'CUST-1000',
+    ...GERMANY,
   });
   await prisma.b2bUnit.createMany({
     data: [unit('UNIT-STUTTGART'), unit('UNIT-MUENCHEN')],
@@ -182,6 +211,7 @@ export async function createMuellerData(prisma: PrismaService) {
     customerNumber,
     accountCustomerNumber: 'CUST-1000',
     isDefault,
+    ...GERMANY,
   });
   await prisma.b2bUnitShipTo.createMany({
     data: [
@@ -222,6 +252,7 @@ export async function tableFingerprint(prisma: PrismaService) {
     'materials',
     'customers',
     'customer_account_members',
+    'customer_sales_areas',
     'b2b_units',
     'b2b_unit_ship_tos',
     'price_conditions',

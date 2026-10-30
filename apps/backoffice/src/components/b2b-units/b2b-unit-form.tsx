@@ -10,6 +10,7 @@ import {
   MAX_SHIP_TOS,
   partnerOptions,
   prefillForAccount,
+  salesAreaStatusLookup,
   toCreateInput,
   toggleShipTo,
   toUpdateInput,
@@ -28,7 +29,14 @@ import {
   type PartnerSummary,
 } from "@/lib/b2b-units";
 import type { CustomerAccount } from "@/lib/customer-accounts";
+import type { Customer } from "@/lib/customers";
 import { ApiError, errorMessage } from "@/lib/erp-api";
+import {
+  findSalesArea,
+  salesAreaId,
+  salesAreaLabel,
+} from "@/lib/sales-area-display";
+import type { SalesArea } from "@/lib/sales-areas";
 import {
   GENERIC_VALIDATION_MESSAGE,
   splitValidationMessages,
@@ -49,12 +57,15 @@ type PartnerField =
 
 /**
  * Side panel for creating a B2B unit (no `unit` given) or editing one.
- * Unit ID, account and Sold-to are fixed after creation.
+ * Unit ID, sales area, account and Sold-to are fixed after creation.
  */
 export function B2bUnitForm({
   unit,
   accounts,
   accountsError,
+  salesAreas,
+  salesAreasError,
+  customers,
   onClose,
   onSaved,
 }: {
@@ -62,6 +73,11 @@ export function B2bUnitForm({
   /** null while loading */
   accounts: CustomerAccount[] | null;
   accountsError: string | null;
+  /** null while loading */
+  salesAreas: SalesArea[] | null;
+  salesAreasError: string | null;
+  /** Customers with their sales area assignments; null while loading */
+  customers: Customer[] | null;
   onClose: () => void;
   onSaved: (unit: B2bUnit, mode: "create" | "edit") => void;
 }) {
@@ -93,10 +109,16 @@ export function B2bUnitForm({
     unit ? savedPartners(unit) : [],
   );
 
+  // Assignments of the partners to the unit's sales area; partners that are
+  // not active there cannot be chosen
+  const statusOf = salesAreaStatusLookup(customers, values.salesArea);
+
   const clientErrors = validateB2bUnitForm(values, {
     mode,
     partners,
     original: unit,
+    salesAreas,
+    statusOf,
   });
 
   function visibleError(field: B2bUnitFormField) {
@@ -189,10 +211,11 @@ export function B2bUnitForm({
     setGeneralError(error.messages);
   }
 
-  const warnings = unit ? inactivePartnerWarnings(unit) : [];
+  const warnings = unit ? inactivePartnerWarnings(unit, statusOf) : [];
   const shipToOptions = partnerOptions(
     partners,
     unit?.shipTos.map((s) => s.customerNumber),
+    statusOf,
   );
   const query = shipToSearch.trim().toLowerCase();
   const visibleShipTos = shipToOptions.filter(
@@ -229,7 +252,8 @@ export function B2bUnitForm({
               </ul>
               <p className="mt-2 text-xs">
                 They stay assigned until you change them. Inactive customers
-                cannot be assigned newly.
+                cannot be assigned newly. A unit can only be reactivated when
+                all its partners are active in its sales area.
               </p>
             </div>
           )}
@@ -271,6 +295,63 @@ export function B2bUnitForm({
                 />
               </Field>
             </div>
+            <Field
+              id="salesArea"
+              label="Sales Area"
+              error={visibleError("salesArea")}
+              hint={
+                mode === "edit"
+                  ? "Cannot be changed. All partners must be active in this sales area."
+                  : "Sales Organization / Distribution Channel / Division. Cannot be changed after creation. All partners must be assigned to it."
+              }
+            >
+              {mode === "edit" && unit ? (
+                <div className="rounded-md border border-line bg-canvas px-3 py-2 text-ink-muted">
+                  <SalesAreaText salesAreas={salesAreas} unit={unit} />
+                </div>
+              ) : (
+                <select
+                  id="salesArea"
+                  value={values.salesArea}
+                  disabled={salesAreas === null}
+                  onChange={(e) => {
+                    const salesArea = e.target.value;
+                    const lookup = salesAreaStatusLookup(customers, salesArea);
+                    // Partners are chosen again for the new sales area
+                    update(
+                      [
+                        "salesArea",
+                        "soldToCustomerNumber",
+                        "billToCustomerNumber",
+                        "payerCustomerNumber",
+                        "shipToCustomerNumbers",
+                        "defaultShipToCustomerNumber",
+                      ],
+                      (v) => prefillForAccount({ ...v, salesArea }, account, lookup),
+                    );
+                  }}
+                  className={`${inputClass(visibleError("salesArea"))} bg-surface`}
+                >
+                  <option value="">
+                    {salesAreas === null
+                      ? salesAreasError
+                        ? "Sales areas could not be loaded"
+                        : "Loading sales areas…"
+                      : "Select a sales area"}
+                  </option>
+                  {salesAreas?.map((area) => (
+                    <option
+                      key={salesAreaId(area)}
+                      value={salesAreaId(area)}
+                      disabled={!area.isActive}
+                    >
+                      {salesAreaLabel(area)}
+                      {area.isActive ? "" : " (inactive)"}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
             <ActiveSwitch
               checked={values.isActive}
               onChange={(isActive) => setValues((v) => ({ ...v, isActive }))}
@@ -317,7 +398,7 @@ export function B2bUnitForm({
                           "shipToCustomerNumbers",
                           "defaultShipToCustomerNumber",
                         ],
-                        (v) => prefillForAccount(v, next),
+                        (v) => prefillForAccount(v, next, statusOf),
                       );
                     }}
                     className={`${inputClass(visibleError("accountCustomerNumber"))} bg-surface`}
@@ -348,7 +429,7 @@ export function B2bUnitForm({
                 label="Sold-to (SP)"
                 values={values}
                 readOnlyPartner={mode === "edit" ? unit?.soldTo : undefined}
-                options={partnerOptions(partners, original ? [original.soldToCustomerNumber] : [])}
+                options={partnerOptions(partners, original ? [original.soldToCustomerNumber] : [], statusOf)}
                 error={visibleError("soldToCustomerNumber")}
                 onChange={(n) => update(["soldToCustomerNumber"], (v) => ({ ...v, soldToCustomerNumber: n }))}
               />
@@ -363,7 +444,7 @@ export function B2bUnitForm({
                 field="billToCustomerNumber"
                 label="Bill-to (BP)"
                 values={values}
-                options={partnerOptions(partners, original ? [original.billToCustomerNumber] : [])}
+                options={partnerOptions(partners, original ? [original.billToCustomerNumber] : [], statusOf)}
                 error={visibleError("billToCustomerNumber")}
                 onChange={(n) => update(["billToCustomerNumber"], (v) => ({ ...v, billToCustomerNumber: n }))}
               />
@@ -371,7 +452,7 @@ export function B2bUnitForm({
                 field="payerCustomerNumber"
                 label="Payer (PY)"
                 values={values}
-                options={partnerOptions(partners, original ? [original.payerCustomerNumber] : [])}
+                options={partnerOptions(partners, original ? [original.payerCustomerNumber] : [], statusOf)}
                 error={visibleError("payerCustomerNumber")}
                 onChange={(n) => update(["payerCustomerNumber"], (v) => ({ ...v, payerCustomerNumber: n }))}
               />
@@ -495,13 +576,37 @@ function ReadOnlyPartner({ partner }: { partner: PartnerSummary }) {
   );
 }
 
+/** Why a partner cannot be chosen in the unit's sales area, if it cannot */
+function salesAreaNote(option: PartnerOption) {
+  if (option.salesAreaStatus === "missing") return "not assigned to the sales area";
+  if (option.salesAreaStatus === "inactive") return "inactive in the sales area";
+  return undefined;
+}
+
 function optionLabel(option: PartnerOption) {
-  const suffix = option.isActive
-    ? ""
-    : option.isAssigned
+  const areaNote = salesAreaNote(option);
+  const suffix = !option.isActive
+    ? option.isAssigned
       ? " (inactive – currently assigned)"
-      : " (inactive)";
+      : " (inactive)"
+    : areaNote
+      ? option.isAssigned
+        ? ` (${areaNote} – currently assigned)`
+        : ` (${areaNote})`
+      : "";
   return `${option.customerNumber} – ${option.name}${suffix}`;
+}
+
+/** The unit's sales area with its name and currency, once loaded */
+function SalesAreaText({
+  salesAreas,
+  unit,
+}: {
+  salesAreas: SalesArea[] | null;
+  unit: B2bUnit;
+}) {
+  const area = findSalesArea(salesAreas, unit.salesArea);
+  return <span className="font-mono">{area ? salesAreaLabel(area) : salesAreaId(unit.salesArea)}</span>;
 }
 
 function PartnerSelect({
@@ -568,15 +673,24 @@ function ShipToList({
         const isDefault = values.defaultShipToCustomerNumber === n;
         // The default stays allowed until another default is chosen
         const toggleLocked = isAllowed ? isDefault : !option.isSelectable;
-        // Inactive customers cannot become the new default
-        const defaultLocked = !option.isActive && !isDefault;
+        // Inactive customers and customers that are not active in the sales
+        // area cannot become the new default (choosing it would add them)
+        const defaultLocked =
+          !isDefault &&
+          (!option.isActive || salesAreaNote(option) !== undefined);
+        const areaNote = salesAreaNote(option);
         const note = isDefault && isAllowed
           ? "Default – choose another default to remove it"
           : !option.isSelectable
-            ? "Inactive – cannot be added"
+            ? option.isActive && areaNote
+              ? `Cannot be added: ${areaNote} (see Customers)`
+              : "Inactive – cannot be added"
             : !option.isActive
               ? "Inactive – currently assigned"
-              : undefined;
+              : areaNote
+                ? `Currently assigned, but ${areaNote}`
+                : undefined;
+        const isWarning = !option.isActive || areaNote !== undefined;
 
         return (
           <li
@@ -598,7 +712,7 @@ function ShipToList({
               <span className="ml-2 text-sm">{option.name}</span>
               {note && (
                 <span
-                  className={`block text-xs ${option.isActive ? "text-ink-muted" : "text-danger"}`}
+                  className={`block text-xs ${isWarning ? "text-danger" : "text-ink-muted"}`}
                 >
                   {note}
                 </span>

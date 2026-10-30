@@ -83,3 +83,46 @@ describe("dates", () => {
     assert.equal(todayIsoDate(new Date(2026, 11, 31, 0, 0)), "2026-12-31");
   });
 });
+
+describe("amounts in currencies with other decimal places", () => {
+  // As configured in the ERP: EUR and PLN have 2 decimal places, JPY has 0
+  const PLN = 2;
+  const JPY = 0;
+
+  it("keeps the two-decimal behaviour for EUR and PLN", () => {
+    assert.equal(amountError("1.999", PLN), amountError("1.999"));
+    assert.equal(normalizeAmount("189,5", PLN), "189.50");
+    assert.equal(formatAmount("4400.00", PLN), "4,400.00");
+  });
+
+  for (const valid of ["700000", "1", " 4400 ", "9999999999"]) {
+    it(`accepts the JPY amount "${valid}"`, () => {
+      assert.equal(amountError(valid, JPY), undefined);
+    });
+  }
+
+  for (const [input, message] of [
+    ["4400.5", "Enter a whole amount: this currency has no decimal places."],
+    ["4400,50", "Enter a whole amount: this currency has no decimal places."],
+    ["0.01", "Enter a whole amount: this currency has no decimal places."],
+    ["abc", "Enter an amount, for example 4200."],
+    ["10000000000", "Amount must not exceed 9,999,999,999."],
+    ["0", "Amount must be greater than 0."],
+  ] as const) {
+    it(`rejects the JPY amount "${input}"`, () => {
+      assert.equal(amountError(input, JPY), message);
+    });
+  }
+
+  it("normalizes JPY amounts without a decimal point", () => {
+    assert.equal(normalizeAmount("0700000", JPY), "700000");
+  });
+
+  it("formats JPY amounts without decimal places", () => {
+    assert.equal(formatAmount("700000", JPY), "700,000");
+    assert.equal(formatAmount("-1500", JPY), "-1,500");
+    // An amount with decimals is never shown as a plausible JPY amount
+    assert.equal(formatAmount("700000.00", JPY), "700000.00");
+    assert.equal(formatAmount("700000", PLN), "700000");
+  });
+});

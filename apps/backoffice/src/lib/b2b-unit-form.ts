@@ -9,6 +9,15 @@ import type {
   UpdateB2bUnitInput,
 } from "./b2b-units.ts";
 import type { CustomerAccount } from "./customer-accounts.ts";
+import type { Customer } from "./customers.ts";
+import {
+  assignmentStatus,
+  findSalesArea,
+  parseSalesAreaId,
+  salesAreaId,
+  type AssignmentStatus,
+} from "./sales-area-display.ts";
+import type { SalesArea } from "./sales-areas.ts";
 
 export const UNIT_ID_MAX_LENGTH = 20;
 export const UNIT_NAME_MAX_LENGTH = 100;
@@ -18,6 +27,8 @@ export const MAX_SHIP_TOS = 50;
 export type B2bUnitFormValues = {
   unitId: string;
   name: string;
+  /** Sales area as "1000/10/00"; chosen once, fixed after creation */
+  salesArea: string;
   accountCustomerNumber: string;
   soldToCustomerNumber: string;
   billToCustomerNumber: string;
@@ -34,6 +45,8 @@ export type B2bUnitFieldErrors = Partial<Record<B2bUnitFormField, string>>;
 export const B2B_UNIT_FIELDS: B2bUnitFormField[] = [
   "unitId",
   "name",
+  // ERP API messages such as "salesArea 1000/20/00 does not exist"
+  "salesArea",
   "accountCustomerNumber",
   "soldToCustomerNumber",
   "billToCustomerNumber",
@@ -53,6 +66,7 @@ export function emptyUnitForm(): B2bUnitFormValues {
   return {
     unitId: "",
     name: "",
+    salesArea: "",
     accountCustomerNumber: "",
     soldToCustomerNumber: "",
     billToCustomerNumber: "",
@@ -67,6 +81,7 @@ export function unitToForm(unit: B2bUnit): B2bUnitFormValues {
   return {
     unitId: unit.unitId,
     name: unit.name,
+    salesArea: salesAreaId(unit.salesArea),
     accountCustomerNumber: unit.account.customerNumber,
     soldToCustomerNumber: unit.soldTo.customerNumber,
     billToCustomerNumber: unit.billTo.customerNumber,
@@ -94,34 +109,81 @@ export function accountPartners(account: CustomerAccount | undefined): PartnerSu
   ];
 }
 
+/**
+ * Status of a customer's assignment to the unit's sales area, or undefined
+ * if it is not known (no sales area chosen yet, customers not loaded). The
+ * ERP API checks the assignments in any case.
+ */
+export type SalesAreaStatusOf = (
+  customerNumber: string,
+) => AssignmentStatus | undefined;
+
+/** Looks up the assignments of the loaded customers for one sales area */
+export function salesAreaStatusLookup(
+  customers: Customer[] | null | undefined,
+  salesArea: string,
+): SalesAreaStatusOf {
+  const key = parseSalesAreaId(salesArea);
+  return (customerNumber) => {
+    const customer = customers?.find((c) => c.customerNumber === customerNumber);
+    if (!key || !customer) return undefined;
+    return assignmentStatus(customer.salesAreas, key);
+  };
+}
+
 export type PartnerOption = PartnerSummary & {
   /** Assigned in the saved unit; kept even if the customer is inactive */
   isAssigned: boolean;
-  /** Can be chosen: active, or an inactive customer that is already assigned */
+  /** Assignment to the unit's sales area, if known */
+  salesAreaStatus?: AssignmentStatus;
+  /**
+   * Can be chosen: active and active in the sales area, or already assigned
+   * to the saved unit
+   */
   isSelectable: boolean;
 };
 
 /**
- * Options for one partner function. Inactive customers can never be chosen
- * newly, but an inactive customer that is already assigned stays visible and
- * selected, so it is never removed or replaced silently.
+ * Options for one partner function. Inactive customers and customers that
+ * are not active in the unit's sales area can never be chosen newly, but a
+ * partner that is already assigned stays visible and selected, so it is
+ * never removed or replaced silently.
  */
 export function partnerOptions(
   partners: PartnerSummary[],
   assigned: string[] = [],
+  statusOf?: SalesAreaStatusOf,
 ): PartnerOption[] {
   return partners.map((partner) => {
     const isAssigned = assigned.includes(partner.customerNumber);
-    return { ...partner, isAssigned, isSelectable: partner.isActive || isAssigned };
+    const salesAreaStatus = statusOf?.(partner.customerNumber);
+    const isUsable =
+      partner.isActive &&
+      (salesAreaStatus === undefined || salesAreaStatus === "active");
+    return {
+      ...partner,
+      isAssigned,
+      salesAreaStatus,
+      isSelectable: isUsable || isAssigned,
+    };
   });
 }
 
-/** New create form for an account: the owner fills all partner functions */
+/**
+ * New create form for an account: the owner fills all partner functions,
+ * if it is active and may be used in the chosen sales area
+ */
 export function prefillForAccount(
   values: B2bUnitFormValues,
   account: CustomerAccount | undefined,
+  statusOf?: SalesAreaStatusOf,
 ): B2bUnitFormValues {
-  const owner = account?.isActive ? account.accountCustomerNumber : "";
+  const ownerNumber = account?.accountCustomerNumber ?? "";
+  const ownerStatus = statusOf?.(ownerNumber);
+  const owner =
+    account?.isActive && (ownerStatus === undefined || ownerStatus === "active")
+      ? ownerNumber
+      : "";
   return {
     ...values,
     accountCustomerNumber: account?.accountCustomerNumber ?? "",
@@ -183,13 +245,28 @@ type ValidationContext = {
   partners: PartnerSummary[];
   /** The saved unit when editing; its assignments may stay as they are */
   original?: B2bUnit;
+  /** Configured sales areas, if loaded */
+  salesAreas?: SalesArea[] | null;
+  /** Assignments of the partners to the unit's sales area, if known */
+  statusOf?: SalesAreaStatusOf;
 };
 
 export function validateB2bUnitForm(
   values: B2bUnitFormValues,
-  { mode, partners, original }: ValidationContext,
+  { mode, partners, original, salesAreas, statusOf }: ValidationContext,
 ): B2bUnitFieldErrors {
   const errors: B2bUnitFieldErrors = {};
+
+  if (mode === "create") {
+    const key = parseSalesAreaId(values.salesArea);
+    if (!key) {
+      errors.salesArea = "Select a sales area.";
+    } else if (findSalesArea(salesAreas, key)?.isActive === false) {
+      errors.salesArea = "This sales area is inactive and cannot be used for new units.";
+    }
+  }
+  // A reactivated unit needs all its partners active in the sales area again
+  const isReactivation = mode === "edit" && original?.isActive === false && values.isActive;
 
   if (mode === "create") {
     const id = values.unitId;
@@ -218,12 +295,24 @@ export function validateB2bUnitForm(
   const originalNumber = (field: (typeof PARTNER_ROLES)[number]["field"]) =>
     original ? unitToForm(original)[field] : undefined;
 
-  /** Same rules as the ERP API: in the account, and active if newly chosen */
+  /**
+   * Same rules as the ERP API: in the account, active if newly chosen, and
+   * active in the unit's sales area if newly chosen or on reactivation
+   */
   const partnerError = (customerNumber: string, isUnchanged: boolean) => {
     const partner = findPartner(customerNumber);
     if (!partner) return `${customerNumber} does not belong to this account.`;
     if (!partner.isActive && !isUnchanged) {
       return `${customerNumber} is inactive and cannot be assigned.`;
+    }
+    if (!isUnchanged || isReactivation) {
+      const status = statusOf?.(customerNumber);
+      if (status === "missing") {
+        return `${customerNumber} is not assigned to sales area ${values.salesArea}.`;
+      }
+      if (status === "inactive") {
+        return `${customerNumber} is inactive in sales area ${values.salesArea}.`;
+      }
     }
     return undefined;
   };
@@ -273,8 +362,15 @@ export function validateB2bUnitForm(
 // Warnings and request bodies
 // ---------------------------------------------------------------------------
 
-/** Readable warnings for inactive customers that are assigned to a unit */
-export function inactivePartnerWarnings(unit: B2bUnit): string[] {
+/**
+ * Readable warnings for inactive customers that are assigned to a unit and,
+ * if the assignments are known, for partners that are no longer active in
+ * the unit's sales area (possible for inactive units only)
+ */
+export function inactivePartnerWarnings(
+  unit: B2bUnit,
+  statusOf?: SalesAreaStatusOf,
+): string[] {
   const warnings: string[] = [];
   if (!unit.account.isActive) {
     warnings.push(`Account ${describe(unit.account)} is inactive.`);
@@ -294,6 +390,19 @@ export function inactivePartnerWarnings(unit: B2bUnit): string[] {
       );
     }
   }
+  if (statusOf) {
+    const area = salesAreaId(unit.salesArea);
+    const partners = new Map<string, PartnerSummary>();
+    for (const partner of [unit.soldTo, unit.billTo, unit.payer, ...unit.shipTos]) {
+      partners.set(partner.customerNumber, partner);
+    }
+    for (const partner of partners.values()) {
+      const status = statusOf(partner.customerNumber);
+      if (status === "inactive" || status === "missing") {
+        warnings.push(`${describe(partner)} is not active in sales area ${area}.`);
+      }
+    }
+  }
   return warnings;
 }
 
@@ -302,9 +411,12 @@ function describe(partner: PartnerSummary) {
 }
 
 export function toCreateInput(values: B2bUnitFormValues): CreateB2bUnitInput {
+  const salesArea = parseSalesAreaId(values.salesArea);
+  if (!salesArea) throw new Error(`Not a sales area: ${values.salesArea}`);
   return {
     unitId: values.unitId,
     name: values.name.trim(),
+    ...salesArea,
     accountCustomerNumber: values.accountCustomerNumber,
     soldToCustomerNumber: values.soldToCustomerNumber,
     billToCustomerNumber: values.billToCustomerNumber,

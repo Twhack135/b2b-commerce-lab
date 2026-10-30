@@ -37,6 +37,13 @@ const member = (customerNumber: string, isActive = true) => ({
   customer: customer(customerNumber, isActive),
 });
 
+// The German sales area of the development data
+const DE = {
+  salesOrganization: '1000',
+  distributionChannel: '10',
+  division: '00',
+};
+
 /** UNIT-STUTTGART as in the development data */
 function unit(
   changes: {
@@ -55,6 +62,7 @@ function unit(
     billToCustomerNumber: 'CUST-1000',
     payerCustomerNumber: 'CUST-1000',
     isActive: changes.isActive ?? true,
+    ...DE,
     soldTo: { ...m('CUST-1000'), owner: m('CUST-1000') },
     billTo: m('CUST-1000'),
     payer: m('CUST-1000'),
@@ -63,6 +71,7 @@ function unit(
       customerNumber: n,
       accountCustomerNumber: 'CUST-1000',
       isDefault: n === 'CUST-1100' && !changes.noDefault,
+      ...DE,
       member: m(n),
     })),
   };

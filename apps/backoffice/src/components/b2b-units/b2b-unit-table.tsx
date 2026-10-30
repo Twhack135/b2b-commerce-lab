@@ -1,19 +1,25 @@
 import { inactivePartnerWarnings } from "@/lib/b2b-unit-form";
 import type { B2bUnit, PartnerSummary } from "@/lib/b2b-units";
+import { salesAreaId, salesAreaName } from "@/lib/sales-area-display";
+import type { SalesArea } from "@/lib/sales-areas";
 import { AlertIcon } from "../icons";
 import { StatusBadge } from "../list-page";
 
 export function B2bUnitTable({
   units,
+  salesAreas,
   onSelect,
 }: {
   units: B2bUnit[];
+  /** For the names of the sales areas; null while loading */
+  salesAreas: SalesArea[] | null;
   onSelect: (unit: B2bUnit) => void;
 }) {
   return (
     <div className="overflow-x-auto">
-      {/* On small screens the account moves below the name and the Sold-to,
-          ship-to count and Edit columns are hidden; tapping a row opens it */}
+      {/* On small screens the account and sales area move below the name and
+          the Sold-to, ship-to count and Edit columns are hidden; tapping a
+          row opens it */}
       <table className="w-full text-left">
         <thead className="bg-canvas/60 text-xs tracking-wide text-ink-muted uppercase">
           <tr>
@@ -22,6 +28,9 @@ export function B2bUnitTable({
             </th>
             <th scope="col" className="px-4 py-2.5 font-medium">
               Name
+            </th>
+            <th scope="col" className="hidden px-4 py-2.5 font-medium md:table-cell">
+              Sales Area
             </th>
             <th scope="col" className="hidden px-4 py-2.5 font-medium md:table-cell">
               Account
@@ -61,7 +70,13 @@ export function B2bUnitTable({
                   <div className="text-xs text-ink-muted md:hidden">
                     Account{" "}
                     <span className="whitespace-nowrap">{unit.account.customerNumber}</span>
+                    {" · "}
+                    <span className="whitespace-nowrap">{salesAreaId(unit.salesArea)}</span>
                   </div>
+                </td>
+                <td className="hidden px-4 py-3 md:table-cell">
+                  <div className="font-mono text-xs whitespace-nowrap">{salesAreaId(unit.salesArea)}</div>
+                  <div className="text-xs text-ink-muted">{salesAreaName(salesAreas, unit.salesArea)}</div>
                 </td>
                 <td className="hidden px-4 py-3 md:table-cell">
                   <Partner partner={unit.account} />
