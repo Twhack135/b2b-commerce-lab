@@ -1,3 +1,4 @@
+import { applyDecorators } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -38,6 +39,12 @@ export enum RequestedShippingMethod {
   EXPRESS = 'EXPRESS',
 }
 
+/** A position as the ERP API evaluates it */
+export interface OrderItemInput {
+  materialNumber: string;
+  quantity: number;
+}
+
 export class SimulationItemDto {
   @IsString()
   @IsBusinessKey()
@@ -49,9 +56,26 @@ export class SimulationItemDto {
   quantity: number;
 }
 
+/**
+ * Positions in request order, validated as instances of `itemType`; the same
+ * material may occur several times. Shared by simulation and creation.
+ */
+export function IsOrderItems(itemType: () => new () => object) {
+  return applyDecorators(
+    IsArray(),
+    ArrayMinSize(1),
+    ArrayMaxSize(MAX_ITEMS),
+    ValidateNested({ each: true }),
+    Type(itemType),
+  );
+}
+
 // Sold-to, Bill-to and Payer are intentionally not listed: they always come
 // from the B2B unit, and the ValidationPipe rejects unknown properties.
-export class SimulateSalesOrderDto {
+// The order header, shared by the simulation and the creation of sales
+// orders; each declares its own positions. Prices are never taken from a
+// request, the ERP API determines them.
+export class OrderRequestDto {
   // Required: the order is simulated in this sales area (the shop context).
   // The server checks it and takes the document currency from it; the unit
   // must belong to it.
@@ -73,13 +97,6 @@ export class SimulateSalesOrderDto {
   @IsOptional()
   @IsCustomerReference()
   shipToCustomerNumber?: string | null;
-
-  // The order date; business rule: pricing date = order date. Required, so
-  // the result never depends on the server's clock.
-  // LIMITATION: the client supplies it for the simulation. Before real
-  // orders can be placed, the ERP API must determine the order date itself.
-  @IsCalendarDate()
-  pricingDate: string;
 
   // Optional wish of the customer; informational only. It is not confirmed
   // and never changes the pricing date. Must not be before the order date.
@@ -105,12 +122,20 @@ export class SimulateSalesOrderDto {
   @IsString()
   @MaxLength(CUSTOMER_NOTE_MAX_LENGTH)
   customerNote?: string | null;
+}
 
+/** What the ERP API evaluates: the order header with its positions */
+export type OrderRequest = OrderRequestDto & { items: OrderItemInput[] };
+
+export class SimulateSalesOrderDto extends OrderRequestDto {
   // Positions in request order; the same material may occur several times
-  @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(MAX_ITEMS)
-  @ValidateNested({ each: true })
-  @Type(() => SimulationItemDto)
+  @IsOrderItems(() => SimulationItemDto)
   items: SimulationItemDto[];
+
+  // The order date; business rule: pricing date = order date. Required, so
+  // the simulation never depends on the server's clock. Creating a sales
+  // order does not accept it: there the ERP API determines the order date
+  // in the time zone of the sales organization (Sprint 10B).
+  @IsCalendarDate()
+  pricingDate: string;
 }

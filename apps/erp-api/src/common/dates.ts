@@ -34,3 +34,18 @@ export function toDbDate(text: string): Date {
 export function fromDbDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
+
+/**
+ * The calendar day (YYYY-MM-DD) that the instant falls on in the IANA time
+ * zone, e.g. 2026-10-30T23:30:00Z is 2026-10-31 in Europe/Berlin and in
+ * Asia/Tokyo, but still 2026-10-30 in UTC. Throws for an unknown time zone.
+ */
+export function calendarDateIn(timeZone: string, instant: Date): string {
+  // en-CA formats dates as YYYY-MM-DD
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant);
+}

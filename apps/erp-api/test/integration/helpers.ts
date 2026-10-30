@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/app.setup';
+import { Clock } from '../../src/common/clock';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 /**
@@ -19,11 +20,16 @@ export const GERMANY = {
 export const POLAND = { ...GERMANY, salesOrganization: '2000' };
 export const JAPAN = { ...GERMANY, salesOrganization: '3000' };
 
-/** The real application, configured exactly like in main.ts */
-export async function createTestApp() {
-  const moduleRef = await Test.createTestingModule({
-    imports: [AppModule],
-  }).compile();
+/**
+ * The real application, configured exactly like in main.ts. Pass `clock`
+ * to control "now", e.g. the order date of sales orders around midnight.
+ */
+export async function createTestApp(options: { clock?: TestClock } = {}) {
+  let builder = Test.createTestingModule({ imports: [AppModule] });
+  if (options.clock) {
+    builder = builder.overrideProvider(Clock).useValue(options.clock);
+  }
+  const moduleRef = await builder.compile();
   const app: INestApplication<App> = moduleRef.createNestApplication();
   configureApp(app);
   await app.init();
@@ -31,6 +37,19 @@ export async function createTestApp() {
   const prisma = app.get(PrismaService);
   const http = () => request(app.getHttpServer());
   return { app, prisma, http };
+}
+
+/** A clock whose time a test sets; starts at the given instant */
+export class TestClock {
+  constructor(private instant: Date) {}
+
+  now(): Date {
+    return this.instant;
+  }
+
+  set(iso: string) {
+    this.instant = new Date(iso);
+  }
 }
 
 /**
@@ -45,7 +64,11 @@ export async function resetDatabase(prisma: PrismaService) {
     throw new Error(`Refusing to delete data in database ${name}`);
   }
   await prisma.$executeRawUnsafe(
-    'TRUNCATE price_conditions, b2b_unit_ship_tos, b2b_units, customer_sales_areas, customer_account_members, customers, materials RESTART IDENTITY',
+    'TRUNCATE sales_order_item_conditions, sales_order_items, sales_order_partners, sales_orders, price_conditions, b2b_unit_ship_tos, b2b_units, customer_sales_areas, customer_account_members, customers, materials RESTART IDENTITY',
+  );
+  // Sales order numbers start again at 1000000001
+  await prisma.$executeRawUnsafe(
+    'ALTER SEQUENCE sales_order_number_seq RESTART',
   );
 }
 
@@ -276,6 +299,10 @@ export async function tableFingerprint(prisma: PrismaService) {
     'b2b_units',
     'b2b_unit_ship_tos',
     'price_conditions',
+    'sales_orders',
+    'sales_order_partners',
+    'sales_order_items',
+    'sales_order_item_conditions',
   ];
   const result: Record<string, string> = {};
   for (const table of tables) {

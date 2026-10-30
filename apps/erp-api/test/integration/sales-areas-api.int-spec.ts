@@ -501,15 +501,15 @@ describe('Sales areas and currencies', () => {
       ],
       [
         'a short sales organization code',
-        `INSERT INTO sales_organizations (code, name, country, currency_code) VALUES ('10', 'Test', 'DE', 'EUR')`,
+        `INSERT INTO sales_organizations (code, name, country, currency_code, time_zone) VALUES ('10', 'Test', 'DE', 'EUR', 'Europe/Berlin')`,
       ],
       [
         'an unknown currency',
-        `INSERT INTO sales_organizations (code, name, country, currency_code) VALUES ('4000', 'Test', 'US', 'USD')`,
+        `INSERT INTO sales_organizations (code, name, country, currency_code, time_zone) VALUES ('4000', 'Test', 'US', 'USD', 'America/New_York')`,
       ],
       [
         'a lower-case country',
-        `INSERT INTO sales_organizations (code, name, country, currency_code) VALUES ('4000', 'Test', 'us', 'EUR')`,
+        `INSERT INTO sales_organizations (code, name, country, currency_code, time_zone) VALUES ('4000', 'Test', 'us', 'EUR', 'America/New_York')`,
       ],
       [
         'a one-character distribution channel',

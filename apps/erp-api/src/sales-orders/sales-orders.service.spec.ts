@@ -1,9 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Clock } from '../common/clock';
 import { Prisma } from '../generated/prisma/client';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SimulateSalesOrderDto } from './dto/simulate-sales-order.dto';
+import { findOrderUnit } from './order-unit';
 import { SalesOrdersService } from './sales-orders.service';
+
+// The unit and its partners are read by findOrderUnit (see order-unit.ts)
+jest.mock('./order-unit');
+// Untyped like the other mocks: the fixtures only contain the fields used
+const findUnit = findOrderUnit as unknown as jest.Mock;
 
 const d = (value: string) => new Prisma.Decimal(value);
 
@@ -111,7 +118,6 @@ describe('SalesOrdersService', () => {
 
   const tx = {
     $executeRaw: jest.fn(),
-    b2bUnit: { findUnique: jest.fn() },
     salesArea: { findUnique: jest.fn() },
   };
   const prisma = { $transaction: jest.fn() };
@@ -122,7 +128,7 @@ describe('SalesOrdersService', () => {
     prisma.$transaction.mockImplementation(
       (work: (client: typeof tx) => unknown) => work(tx),
     );
-    tx.b2bUnit.findUnique.mockResolvedValue(unitRecord);
+    findUnit.mockResolvedValue(unitRecord);
     tx.salesArea.findUnique.mockResolvedValue(areaRow(GERMANY));
     pricing.priceItems.mockResolvedValue([
       priced('MAT-001', '4400.00', 2),
@@ -134,6 +140,7 @@ describe('SalesOrdersService', () => {
         SalesOrdersService,
         { provide: PrismaService, useValue: prisma },
         { provide: PricingService, useValue: pricing },
+        Clock,
       ],
     }).compile();
     service = module.get(SalesOrdersService);
@@ -151,8 +158,9 @@ describe('SalesOrdersService', () => {
     expect(
       (tx.$executeRaw.mock.calls[0] as [TemplateStringsArray])[0].join(''),
     ).toBe('SET TRANSACTION READ ONLY');
+    expect(findUnit).toHaveBeenCalledWith(tx, 'UNIT-STUTTGART');
     expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      tx.b2bUnit.findUnique.mock.invocationCallOrder[0],
+      findUnit.mock.invocationCallOrder[0],
     );
   });
 
@@ -312,7 +320,7 @@ describe('SalesOrdersService', () => {
 
     it('totals in JPY without decimal places', async () => {
       const japanUnit = { ...unitRecord, ...JAPAN };
-      tx.b2bUnit.findUnique.mockResolvedValue(japanUnit);
+      findUnit.mockResolvedValue(japanUnit);
       tx.salesArea.findUnique.mockResolvedValue(
         areaRow(JAPAN, { code: 'JPY', decimals: 0 }),
       );
@@ -370,7 +378,7 @@ describe('SalesOrdersService', () => {
   });
 
   it('keeps the note warning even if the simulation is invalid', async () => {
-    tx.b2bUnit.findUnique.mockResolvedValue(null);
+    findUnit.mockResolvedValue(null);
     pricing.priceItems.mockResolvedValue([
       { material: null, determination: null },
       { material: null, determination: null },
@@ -420,7 +428,6 @@ describe('SalesOrdersService requested delivery date', () => {
   let service: SalesOrdersService;
   const tx = {
     $executeRaw: jest.fn(),
-    b2bUnit: { findUnique: jest.fn() },
     salesArea: { findUnique: jest.fn() },
   };
   const prisma = { $transaction: jest.fn() };
@@ -431,7 +438,7 @@ describe('SalesOrdersService requested delivery date', () => {
     prisma.$transaction.mockImplementation(
       (work: (client: typeof tx) => unknown) => work(tx),
     );
-    tx.b2bUnit.findUnique.mockResolvedValue(unitRecord);
+    findUnit.mockResolvedValue(unitRecord);
     tx.salesArea.findUnique.mockResolvedValue(areaRow(GERMANY));
     pricing.priceItems.mockResolvedValue([
       priced('MAT-001', '4400.00', 2),
@@ -442,6 +449,7 @@ describe('SalesOrdersService requested delivery date', () => {
         SalesOrdersService,
         { provide: PrismaService, useValue: prisma },
         { provide: PricingService, useValue: pricing },
+        Clock,
       ],
     }).compile();
     service = module.get(SalesOrdersService);
