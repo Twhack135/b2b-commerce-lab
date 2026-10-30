@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isCalendarDate, todayIsoDate } from "./dates.ts";
-import { amountError, formatAmount, normalizeAmount } from "./money.ts";
+import { amountError, formatAmount, formatApiAmount, normalizeAmount } from "./money.ts";
 
 describe("amountError", () => {
   for (const valid of ["4200.50", "4200,50", "0.01", "9999999999.99", "42", "42.5", " 199.00 ", "007.10"]) {
@@ -124,5 +124,23 @@ describe("amounts in currencies with other decimal places", () => {
     // An amount with decimals is never shown as a plausible JPY amount
     assert.equal(formatAmount("700000.00", JPY), "700000.00");
     assert.equal(formatAmount("700000", PLN), "700000");
+  });
+});
+
+describe("formatApiAmount", () => {
+  it("formats with the decimal places of the currency", () => {
+    assert.equal(formatApiAmount("4400.00", 2), "4,400.00");
+    assert.equal(formatApiAmount("4400.00", 2), formatApiAmount("4400.00"));
+    assert.equal(formatApiAmount("700000", 0), "700,000");
+    assert.equal(formatApiAmount("10695.00", 2), "10,695.00");
+  });
+
+  it("uses the decimal places as sent while the currency is not known", () => {
+    assert.equal(formatApiAmount("700000"), "700,000");
+    assert.equal(formatApiAmount("189.50"), "189.50");
+  });
+
+  it("never shows a mismatching amount as a plausible one", () => {
+    assert.equal(formatApiAmount("700000.50", 0), "700000.50");
   });
 });

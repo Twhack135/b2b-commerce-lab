@@ -6,11 +6,14 @@
 export class ApiError extends Error {
   readonly status: number;
   readonly messages: string[];
+  /** The parsed error body, e.g. the pricing analysis of NO_PRICE_FOUND */
+  readonly data: unknown;
 
-  constructor(status: number, messages: string[]) {
+  constructor(status: number, messages: string[], data: unknown = null) {
     super(messages.join(" "));
     this.status = status;
     this.messages = messages;
+    this.data = data;
   }
 }
 
@@ -41,7 +44,7 @@ export async function erpFetch<T>(
   const data: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new ApiError(response.status, readMessages(response.status, data));
+    throw new ApiError(response.status, readMessages(response.status, data), data);
   }
   return data as T;
 }

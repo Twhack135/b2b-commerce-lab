@@ -7,7 +7,6 @@ import type { Material } from "./materials.ts";
 export type MaterialOption = {
   materialNumber: string;
   description: string;
-  currency: string;
 };
 
 export type MaterialSearchResult = {
@@ -28,7 +27,6 @@ export function toMaterialOption(material: Material): MaterialOption {
   return {
     materialNumber: material.materialNumber,
     description: material.description,
-    currency: material.currency,
   };
 }
 

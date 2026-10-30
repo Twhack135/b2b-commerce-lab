@@ -10,7 +10,6 @@ import {
 const m = (materialNumber: string, description: string): MaterialOption => ({
   materialNumber,
   description,
-  currency: "EUR",
 });
 
 const materials = [

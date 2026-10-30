@@ -1,19 +1,22 @@
-import { formatAmount } from "@/lib/money";
+import { formatApiAmount } from "@/lib/money";
 import { SOURCE_LABELS, stepStatus, type StepStatus } from "@/lib/price-check";
 import type { PricingStep } from "@/lib/pricing";
 
 /**
- * The checked levels of a price determination (B2B unit, Sold-to, base
- * price), comparable to the SAP pricing analysis. Used by the Price Check
- * and the Order Simulation.
+ * The checked levels of a price determination (B2B unit, Sold-to, list
+ * price of the sales area), comparable to the SAP pricing analysis. Used by
+ * the Price Check and the Order Simulation.
  */
 export function PricingAnalysis({
   steps,
   currency,
+  decimals,
   showTitle = true,
 }: {
   steps: PricingStep[];
   currency: string;
+  /** Decimal places of the currency, e.g. 0 for JPY */
+  decimals?: number;
   /** Hide the title when the surrounding element already names it */
   showTitle?: boolean;
 }) {
@@ -54,7 +57,7 @@ export function PricingAnalysis({
                 )}
               </span>
               <span className="tabular-nums">
-                {step.amount === null ? "—" : `${formatAmount(step.amount)} ${currency}`}
+                {step.amount === null ? "—" : `${formatApiAmount(step.amount, decimals)} ${currency}`}
               </span>
               <StepBadge status={status} />
             </li>

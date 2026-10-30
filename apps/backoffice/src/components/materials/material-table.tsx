@@ -1,4 +1,4 @@
-import { formatPrice, type Material } from "@/lib/materials";
+import type { Material } from "@/lib/materials";
 
 export function MaterialTable({
   materials,
@@ -9,8 +9,8 @@ export function MaterialTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      {/* On small screens the currency is shown next to the price and the
-          Edit column is hidden; tapping a row opens the material */}
+      {/* On small screens the Edit column is hidden; tapping a row opens
+          the material. Prices are not part of the material master. */}
       <table className="w-full text-left">
         <thead className="bg-canvas/60 text-xs tracking-wide text-ink-muted uppercase">
           <tr>
@@ -19,12 +19,6 @@ export function MaterialTable({
             </th>
             <th scope="col" className="px-4 py-2.5 font-medium">
               Description
-            </th>
-            <th scope="col" className="px-4 py-2.5 text-right font-medium">
-              Price
-            </th>
-            <th scope="col" className="hidden px-4 py-2.5 font-medium sm:table-cell">
-              Currency
             </th>
             <th scope="col" className="hidden px-4 py-2.5 sm:table-cell">
               <span className="sr-only">Actions</span>
@@ -42,16 +36,6 @@ export function MaterialTable({
                 {material.materialNumber}
               </td>
               <td className="px-4 py-3">{material.description}</td>
-              <td className="px-4 py-3 text-right whitespace-nowrap tabular-nums">
-                {formatPrice(material.price)}
-                <span className="text-ink-muted sm:hidden">
-                  {" "}
-                  {material.currency}
-                </span>
-              </td>
-              <td className="hidden px-4 py-3 text-ink-muted sm:table-cell">
-                {material.currency}
-              </td>
               <td className="hidden px-4 py-3 text-right sm:table-cell">
                 {/* The button makes editing reachable by keyboard */}
                 <button

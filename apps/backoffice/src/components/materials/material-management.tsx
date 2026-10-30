@@ -50,7 +50,7 @@ export function MaterialManagement() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Material Management"
-        description="Create and maintain materials of the ERP material master."
+        description="Create and maintain materials of the ERP material master. Prices are maintained per sales area in Pricing."
         actionLabel="New Material"
         onAction={() => {
           setNotice(null);

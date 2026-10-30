@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { SalesOrderSimulation, SimulatedItem } from "./sales-orders.ts";
 import {
   allMessages,
+  checkLabel,
   badRequestErrors,
   headerFieldMessages,
   itemMessagesByIndex,
@@ -29,6 +30,8 @@ const item = (itemNumber: number, changes: Partial<SimulatedItem> = {}): Simulat
 const result = (changes: Partial<SalesOrderSimulation> = {}): SalesOrderSimulation => ({
   simulated: true,
   status: "VALID",
+  salesArea: { salesOrganization: "1000", distributionChannel: "10", division: "00" },
+  currency: "EUR",
   pricingDate: "2026-11-15",
   requestedDeliveryDate: null,
   requestedShippingMethod: "STANDARD",
@@ -144,5 +147,30 @@ describe("pricing date messages", () => {
     ]);
     assert.deepEqual(mapped.header, {});
     assert.equal(mapped.other.length, 1);
+  });
+});
+
+describe("sales area messages", () => {
+  it("names the sales area check", () => {
+    assert.equal(checkLabel({ check: "SALES_AREA", result: "FAILED" }), "Sales area");
+  });
+
+  it("shows sales area errors at the sales area input", () => {
+    const message = {
+      severity: "ERROR" as const,
+      code: "SALES_AREA_INACTIVE",
+      text: "Sales area 2000/10/00 is inactive.",
+      field: "salesOrganization",
+    };
+    assert.deepEqual(headerFieldMessages(result({ messages: [message] })).salesArea, [message]);
+  });
+
+  it("maps 400 messages of the three sales area fields to the one input", () => {
+    const mapped = badRequestErrors([
+      "salesOrganization must be 4 capital letters or digits, e.g. 1000",
+      "division must be 2 capital letters or digits, e.g. 10",
+    ]);
+    assert.equal(mapped.header.salesArea, "SalesOrganization must be 4 capital letters or digits, e.g. 1000.");
+    assert.deepEqual(mapped.other, []);
   });
 });

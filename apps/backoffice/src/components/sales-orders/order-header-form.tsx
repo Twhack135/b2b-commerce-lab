@@ -7,11 +7,18 @@ import {
   inactiveDefaultShipTo,
   shipToOptions,
   unitPartners,
+  unitsOfSalesArea,
   type HeaderField,
   type OrderSimulationValues,
 } from "@/lib/order-simulation-form";
 import type { RequestedShippingMethod, SimulationMessage } from "@/lib/sales-orders";
 import type { PartnerRole } from "@/lib/simulation-display";
+import {
+  salesAreaById,
+  salesAreaId,
+  salesAreaLabel,
+} from "@/lib/sales-area-display";
+import type { SalesArea } from "@/lib/sales-areas";
 import { Field, inputClass } from "../forms/form-controls";
 
 const SHIPPING_METHODS: { value: RequestedShippingMethod; label: string; hint: string }[] = [
@@ -19,9 +26,15 @@ const SHIPPING_METHODS: { value: RequestedShippingMethod; label: string; hint: s
   { value: "EXPRESS", label: "Express", hint: "Faster delivery requested" },
 ];
 
-/** Order header: B2B unit, derived partners, Ship-to and header data */
+/**
+ * Order header: sales area (the shop context), B2B unit of that sales area,
+ * derived partners, Ship-to and header data
+ */
 export function OrderHeaderForm({
   values,
+  salesAreas,
+  salesAreasError,
+  onSelectSalesArea,
   units,
   unitsError,
   errors,
@@ -32,6 +45,10 @@ export function OrderHeaderForm({
   onChange,
 }: {
   values: OrderSimulationValues;
+  /** null while loading */
+  salesAreas: SalesArea[] | null;
+  salesAreasError: string | null;
+  onSelectSalesArea: (salesArea: string) => void;
   /** Today; null until known in the browser. Prices are always determined
       for the order date (pricing date = order date, an internal rule). */
   orderDate: string | null;
@@ -47,7 +64,10 @@ export function OrderHeaderForm({
   onSelectUnit: (unitId: string) => void;
   onChange: (changes: Partial<OrderSimulationValues>) => void;
 }) {
-  const unit = units?.find((u) => u.unitId === values.unitId);
+  const area = salesAreaById(salesAreas, values.salesArea);
+  // Only units of the selected sales area are offered
+  const areaUnits = units ? unitsOfSalesArea(units, values.salesArea) : null;
+  const unit = areaUnits?.find((u) => u.unitId === values.unitId);
   const partners = unitPartners(unit);
   const shipTos = shipToOptions(unit);
   const inactiveDefault = inactiveDefaultShipTo(unit);
@@ -64,23 +84,67 @@ export function OrderHeaderForm({
 
       <div className="space-y-5 px-4 py-4">
         <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            id="salesArea"
+            label="Sales Area"
+            error={errors.salesArea}
+            hint={
+              area
+                ? `Document currency ${area.currency}, decided by the ERP API. Changing the sales area clears a unit of another sales area.`
+                : undefined
+            }
+          >
+            <select
+              id="salesArea"
+              value={values.salesArea}
+              disabled={salesAreas === null}
+              aria-invalid={errors.salesArea ? true : undefined}
+              onChange={(e) => onSelectSalesArea(e.target.value)}
+              className={`${inputClass(errors.salesArea)} bg-surface`}
+            >
+              <option value="">
+                {salesAreas === null
+                  ? salesAreasError
+                    ? "Sales areas could not be loaded"
+                    : "Loading sales areas…"
+                  : "Select a sales area"}
+              </option>
+              {salesAreas?.map((a) => (
+                <option key={salesAreaId(a)} value={salesAreaId(a)} disabled={!a.isActive}>
+                  {salesAreaLabel(a)}
+                  {a.isActive ? "" : " (inactive)"}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div data-document-currency className="text-sm">
+            <p className="mb-1.5 font-medium">Document currency</p>
+            <p className="rounded-md border border-line bg-canvas px-3 py-2 font-mono text-ink-muted">
+              {area?.currency ?? "—"}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
           <Field id="unitId" label="B2B Unit" error={errors.unitId}>
             <select
               id="unitId"
               value={values.unitId}
-              disabled={units === null}
+              disabled={areaUnits === null}
               aria-invalid={errors.unitId ? true : undefined}
               onChange={(e) => onSelectUnit(e.target.value)}
               className={`${inputClass(errors.unitId)} bg-surface`}
             >
               <option value="">
-                {units === null
+                {areaUnits === null
                   ? unitsError
                     ? "B2B units could not be loaded"
                     : "Loading B2B units…"
-                  : "Select a B2B unit"}
+                  : areaUnits.length === 0
+                    ? "No B2B units in this sales area"
+                    : "Select a B2B unit"}
               </option>
-              {units?.map((u) => (
+              {areaUnits?.map((u) => (
                 <option key={u.unitId} value={u.unitId} disabled={!u.isActive}>
                   {u.unitId} – {u.name}
                   {u.isActive ? "" : " (inactive – cannot be selected)"}

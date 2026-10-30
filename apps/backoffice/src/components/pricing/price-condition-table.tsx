@@ -1,4 +1,10 @@
-import { formatAmount } from "@/lib/money";
+import { formatApiAmount } from "@/lib/money";
+import {
+  currencyDecimals,
+  salesAreaId,
+  salesAreaName,
+} from "@/lib/sales-area-display";
+import type { SalesArea } from "@/lib/sales-areas";
 import {
   conditionWarnings,
   SCOPE_LABELS,
@@ -12,10 +18,13 @@ import { StatusBadge } from "../list-page";
 
 export function PriceConditionTable({
   conditions,
+  salesAreas,
   today,
   onSelect,
 }: {
   conditions: PriceCondition[];
+  /** Names and decimal places of the sales areas; null while loading */
+  salesAreas: SalesArea[] | null;
   /** null until known in the browser; validity badges are hidden until then */
   today: string | null;
   onSelect: (condition: PriceCondition) => void;
@@ -33,6 +42,9 @@ export function PriceConditionTable({
             <th scope="col" className="px-3 py-2.5 sm:px-4 font-medium">
               Material
             </th>
+            <th scope="col" className="hidden px-3 sm:px-4 py-2.5 font-medium lg:table-cell">
+              Sales Area
+            </th>
             <th scope="col" className="hidden px-3 sm:px-4 py-2.5 font-medium md:table-cell">
               Type
             </th>
@@ -40,7 +52,7 @@ export function PriceConditionTable({
               Level
             </th>
             <th scope="col" className="hidden px-3 sm:px-4 py-2.5 font-medium sm:table-cell">
-              Sold-to / Unit
+              Customer / Unit
             </th>
             <th scope="col" className="px-3 py-2.5 sm:px-4 text-right font-medium">
               Amount
@@ -82,11 +94,28 @@ export function PriceConditionTable({
                     </span>{" "}
                     · {SCOPE_LABELS[condition.scope]}{" "}
                     <span className="font-mono whitespace-nowrap">
-                      {condition.unit?.unitId ?? condition.soldTo?.customerNumber}
+                      {condition.unit?.unitId ??
+                        condition.soldTo?.customerNumber ??
+                        salesAreaId(condition.salesArea)}
+                    </span>
+                    <span className="lg:hidden">
+                      {" "}
+                      · <span className="font-mono">{salesAreaId(condition.salesArea)}</span>
                     </span>
                     <br />
                     {/* May wrap between the dates on small screens */}
                     <Validity condition={condition} canWrap />
+                  </div>
+                </td>
+                <td
+                  className="hidden px-3 sm:px-4 py-3 lg:table-cell"
+                  data-sales-area={salesAreaId(condition.salesArea)}
+                >
+                  <div className="font-mono text-xs whitespace-nowrap">
+                    {salesAreaId(condition.salesArea)}
+                  </div>
+                  <div className="text-xs text-ink-muted">
+                    {salesAreaName(salesAreas, condition.salesArea)}
                   </div>
                 </td>
                 <td
@@ -102,10 +131,15 @@ export function PriceConditionTable({
                   <ScopeBadge scope={condition.scope} />
                 </td>
                 <td className="hidden px-3 sm:px-4 py-3 sm:table-cell">
-                  <ConditionKey condition={condition} />
+                  <ConditionKey condition={condition} salesAreas={salesAreas} />
                 </td>
                 <td className="px-3 py-3 sm:px-4 text-right whitespace-nowrap tabular-nums">
-                  <span className="font-medium">{formatAmount(condition.amount)}</span>{" "}
+                  <span className="font-medium">
+                    {formatApiAmount(
+                      condition.amount,
+                      currencyDecimals(salesAreas, condition.currency),
+                    )}
+                  </span>{" "}
                   <span className="text-xs text-ink-muted">{condition.currency}</span>
                 </td>
                 <td className="hidden px-3 sm:px-4 py-3 text-sm md:table-cell">
@@ -160,7 +194,9 @@ export function ScopeBadge({ scope }: { scope: PriceCondition["scope"] }) {
       className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
         scope === "B2B_UNIT"
           ? "bg-brand-soft text-brand-strong"
-          : "bg-canvas text-ink"
+          : scope === "SALES_AREA"
+            ? "border border-line bg-surface text-ink-muted"
+            : "bg-canvas text-ink"
       }`}
     >
       {SCOPE_LABELS[scope]}
@@ -168,8 +204,18 @@ export function ScopeBadge({ scope }: { scope: PriceCondition["scope"] }) {
   );
 }
 
-/** Sold-to or unit with its Sold-to; inactive ones are marked */
-function ConditionKey({ condition }: { condition: PriceCondition }) {
+/**
+ * Sold-to, or unit with its Sold-to, or (list price) all customers of the
+ * sales area; inactive partners are marked. A condition never has to have a
+ * customer or a unit.
+ */
+function ConditionKey({
+  condition,
+  salesAreas,
+}: {
+  condition: PriceCondition;
+  salesAreas: SalesArea[] | null;
+}) {
   if (condition.unit) {
     const { unit } = condition;
     return (
@@ -186,7 +232,17 @@ function ConditionKey({ condition }: { condition: PriceCondition }) {
       </div>
     );
   }
-  const soldTo = condition.soldTo!;
+  const { soldTo } = condition;
+  if (!soldTo) {
+    return (
+      <div data-list-price>
+        <div className="text-xs">All customers</div>
+        <div className="text-xs text-ink-muted">
+          List price of {salesAreaName(salesAreas, condition.salesArea)}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={soldTo.isActive ? "" : "text-danger"}>
       <div className="font-mono text-xs">{soldTo.customerNumber}</div>

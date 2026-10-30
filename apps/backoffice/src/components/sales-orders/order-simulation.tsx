@@ -16,6 +16,7 @@ import {
   inputKey,
   quantityEnter,
   removeItem,
+  selectSalesArea,
   selectUnit,
   toSimulationRequest,
   updateItem,
@@ -34,6 +35,8 @@ import {
   itemMessagesByIndex,
   partnerRoleMessages,
 } from "@/lib/simulation-display";
+import { currencyDecimals } from "@/lib/sales-area-display";
+import { listSalesAreas } from "@/lib/sales-areas";
 import { useListData } from "@/lib/use-list-data";
 import { useToday } from "@/lib/use-today";
 import { FormErrorAlert } from "../forms/form-controls";
@@ -52,6 +55,8 @@ type Simulated = { result: SalesOrderSimulation; inputKey: string };
 export function OrderSimulation() {
   const units = useListData(listB2bUnits);
   const materials = useListData(listMaterials);
+  // The shop context: the first field of the order header
+  const salesAreas = useListData(listSalesAreas);
   // Pricing date = order date = today. The user cannot change it.
   // LIMITATION (Sprint 8B only): today is the date of the user's browser;
   // the ERP API must become authoritative for the order and pricing date
@@ -87,7 +92,12 @@ export function OrderSimulation() {
   );
   const search = useMemo(() => clientMaterialSearch(materialOptions), [materialOptions]);
 
-  const clientErrors = validateSimulationForm(form, units.items ?? [], pricingDate);
+  const clientErrors = validateSimulationForm(
+    form,
+    units.items ?? [],
+    pricingDate,
+    salesAreas.items ?? [],
+  );
   const isOutdated =
     simulated !== null && simulated.inputKey !== inputKey(form, pricingDate);
   // Messages are only shown at the inputs while they belong to this input
@@ -97,7 +107,7 @@ export function OrderSimulation() {
   const itemErrors: Record<number, Partial<Record<ItemField, string>>> = {};
   if (current) {
     const byField = headerFieldMessages(current);
-    for (const field of ["unitId", "shipToCustomerNumber", "requestedDeliveryDate"] as const) {
+    for (const field of ["salesArea", "unitId", "shipToCustomerNumber", "requestedDeliveryDate"] as const) {
       const firstError = byField[field]?.find((m) => m.severity === "ERROR");
       if (firstError) headerErrors[field] = firstError.text;
     }
@@ -187,7 +197,7 @@ export function OrderSimulation() {
     setItemNotice(null);
   }
 
-  const loadError = units.loadError ?? materials.loadError;
+  const loadError = units.loadError ?? materials.loadError ?? salesAreas.loadError;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -215,10 +225,11 @@ export function OrderSimulation() {
           <LoadError
             title="Master data could not be loaded"
             message={loadError}
-            isRetrying={units.isLoading || materials.isLoading}
+            isRetrying={units.isLoading || materials.isLoading || salesAreas.isLoading}
             onRetry={() => {
               units.reload();
               materials.reload();
+              salesAreas.reload();
             }}
           />
         </div>
@@ -228,6 +239,11 @@ export function OrderSimulation() {
 
           <OrderHeaderForm
             values={form}
+            salesAreas={salesAreas.items}
+            salesAreasError={salesAreas.loadError}
+            onSelectSalesArea={(salesArea) =>
+              change((v) => selectSalesArea(v, salesArea, units.items ?? []))
+            }
             units={units.items}
             unitsError={units.loadError}
             errors={headerErrors}
@@ -269,6 +285,7 @@ export function OrderSimulation() {
                 isSimulating ||
                 units.items === null ||
                 materials.items === null ||
+                salesAreas.items === null ||
                 today === null
               }
               className="rounded-md bg-brand px-4 py-2 font-medium text-white hover:bg-brand-strong disabled:opacity-60"
@@ -281,7 +298,15 @@ export function OrderSimulation() {
 
       {simulated && (
         <div className="mt-6">
-          <SimulationResult result={simulated.result} isOutdated={isOutdated} />
+          <SimulationResult
+            result={simulated.result}
+            isOutdated={isOutdated}
+            decimals={
+              simulated.result.currency
+                ? currencyDecimals(salesAreas.items, simulated.result.currency)
+                : undefined
+            }
+          />
         </div>
       )}
     </div>

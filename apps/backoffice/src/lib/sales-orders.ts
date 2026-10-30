@@ -2,13 +2,14 @@ import type { PartnerSummary } from "./b2b-units";
 import type { ConditionTypeSummary } from "./condition-types";
 import { erpFetch } from "./erp-api";
 import type { PricingSource, PricingStep } from "./pricing";
+import type { SalesAreaKey } from "./sales-areas";
 
 // Types of POST /sales-orders/simulate (see apps/erp-api sales-orders).
 // Amounts are decimal strings; nothing is ever stored by a simulation.
 
 export type RequestedShippingMethod = "STANDARD" | "EXPRESS";
 
-export type SimulationRequest = {
+export type SimulationRequest = SalesAreaKey & {
   unitId: string;
   shipToCustomerNumber: string;
   /** The order date; business rule: pricing date = order date */
@@ -49,10 +50,10 @@ export type SimulatedItem = {
   currency: string | null;
   pricing: {
     source: PricingSource;
-    /** Condition type of the used price (ZP01 for the base price) */
+    /** Condition type of the used price, e.g. ZP01 for the list price */
     conditionType: ConditionTypeSummary | null;
-    conditionId: number | null;
-    validFrom: string | null;
+    conditionId: number;
+    validFrom: string;
     validTo: string | null;
     steps: PricingStep[];
   } | null;
@@ -79,6 +80,10 @@ export type ProposedOrderBlock = {
 export type SalesOrderSimulation = {
   simulated: true;
   status: SimulationStatus;
+  /** The requested sales area */
+  salesArea: SalesAreaKey;
+  /** Document currency of the sales area; null if it does not exist */
+  currency: string | null;
   /** The order date (= pricing date) */
   pricingDate: string;
   requestedDeliveryDate: string | null;

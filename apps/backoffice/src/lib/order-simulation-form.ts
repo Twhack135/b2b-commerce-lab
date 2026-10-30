@@ -10,6 +10,13 @@ import type {
   RequestedShippingMethod,
   SimulationRequest,
 } from "./sales-orders.ts";
+import {
+  DEFAULT_SALES_AREA_ID,
+  parseSalesAreaId,
+  salesAreaById,
+  salesAreaId,
+} from "./sales-area-display.ts";
+import type { SalesArea } from "./sales-areas.ts";
 
 /** Technical limit of the ERP API, not a business rule */
 export const MAX_ITEMS = 200;
@@ -28,6 +35,11 @@ export type ItemDraft = {
 };
 
 export type OrderSimulationValues = {
+  /**
+   * The sales area (shop context) as "1000/10/00"; the first commercial
+   * field. The unit must belong to it; the document currency comes from it.
+   */
+  salesArea: string;
   unitId: string;
   shipToCustomerNumber: string;
   /** Optional, YYYY-MM-DD; empty means no requested date */
@@ -39,6 +51,7 @@ export type OrderSimulationValues = {
 };
 
 export type HeaderField =
+  | "salesArea"
   | "unitId"
   | "shipToCustomerNumber"
   | "requestedDeliveryDate"
@@ -59,8 +72,12 @@ export function itemNumberAt(index: number) {
   return (index + 1) * ITEM_NUMBER_STEP;
 }
 
-export function emptySimulationForm(): OrderSimulationValues {
+/** A new order starts in the German sales area unless the user chooses another one */
+export function emptySimulationForm(
+  salesArea: string = DEFAULT_SALES_AREA_ID,
+): OrderSimulationValues {
   return {
+    salesArea,
     unitId: "",
     shipToCustomerNumber: "",
     requestedDeliveryDate: "",
@@ -214,6 +231,29 @@ export function shipToOptions(unit: B2bUnit | undefined): ShipToOption[] {
   }));
 }
 
+/** The B2B units of the selected sales area; the only ones offered */
+export function unitsOfSalesArea(units: B2bUnit[], salesArea: string): B2bUnit[] {
+  return units.filter((u) => salesAreaId(u.salesArea) === salesArea);
+}
+
+/**
+ * Changing the sales area keeps the unit and Ship-to only if the unit
+ * belongs to the new sales area; otherwise both are cleared, so a unit of
+ * another market is never submitted. The positions stay: materials are the
+ * same in every market, their prices are determined again.
+ */
+export function selectSalesArea(
+  values: OrderSimulationValues,
+  salesArea: string,
+  units: B2bUnit[],
+): OrderSimulationValues {
+  const unit = units.find((u) => u.unitId === values.unitId);
+  const keepsUnit = unit !== undefined && salesAreaId(unit.salesArea) === salesArea;
+  return keepsUnit
+    ? { ...values, salesArea }
+    : { ...values, salesArea, unitId: "", shipToCustomerNumber: "" };
+}
+
 /**
  * Selecting a unit selects its default Ship-to. An inactive default is not
  * selected, and no other Ship-to is chosen silently instead.
@@ -251,13 +291,24 @@ export function validateSimulationForm(
   units: B2bUnit[],
   /** Today, YYYY-MM-DD; a requested delivery date must not be earlier */
   orderDate: string,
+  /** Configured sales areas; may be missing while they load */
+  salesAreas: SalesArea[] = [],
 ): SimulationFormErrors {
   const errors: SimulationFormErrors = { header: {}, items: {} };
   const header = errors.header;
 
+  const area = salesAreaById(salesAreas, values.salesArea);
+  if (!parseSalesAreaId(values.salesArea)) {
+    header.salesArea = "Select a sales area.";
+  } else if (area && !area.isActive) {
+    header.salesArea = `Sales area ${values.salesArea} is inactive.`;
+  }
+
   const unit = units.find((u) => u.unitId === values.unitId);
   if (values.unitId === "") {
     header.unitId = "Select a B2B unit.";
+  } else if (unit && salesAreaId(unit.salesArea) !== values.salesArea) {
+    header.unitId = `B2B unit ${unit.unitId} belongs to sales area ${salesAreaId(unit.salesArea)}, not ${values.salesArea}.`;
   } else if (unit && !unit.isActive) {
     header.unitId = `B2B unit ${unit.unitId} is inactive and cannot be selected.`;
   }
@@ -338,7 +389,11 @@ export function toSimulationRequest(
   values: OrderSimulationValues,
   pricingDate: string,
 ): SimulationRequest {
+  const key = parseSalesAreaId(values.salesArea);
+  if (!key) throw new Error(`Not a sales area: ${values.salesArea}`);
   return {
+    // The shop context; the ERP API checks it and decides the currency
+    ...key,
     unitId: values.unitId,
     shipToCustomerNumber: values.shipToCustomerNumber,
     pricingDate,

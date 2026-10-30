@@ -15,7 +15,6 @@ import {
 } from "@/lib/condition-type-display";
 import type { ConditionType } from "@/lib/condition-types";
 import type { Material } from "@/lib/materials";
-import { formatAmount } from "@/lib/money";
 import {
   conditionToForm,
   conditionWarnings,
@@ -24,6 +23,8 @@ import {
   PRICE_CONDITION_FIELDS,
   PRICE_CONDITION_LABELS,
   SCOPE_LABELS,
+  SCOPE_ORDER,
+  scopesOf,
   soldToOptions,
   toCreateInput,
   toUpdateInput,
@@ -39,6 +40,12 @@ import {
   type PriceCondition,
   type PriceConditionScope,
 } from "@/lib/price-conditions";
+import {
+  salesAreaById,
+  salesAreaId,
+  salesAreaLabel,
+} from "@/lib/sales-area-display";
+import type { SalesArea } from "@/lib/sales-areas";
 import { AlertIcon } from "../icons";
 import {
   Field,
@@ -48,20 +55,24 @@ import {
 } from "../forms/form-controls";
 import { SidePanel } from "../forms/side-panel";
 
-const SCOPES: { value: PriceConditionScope; hint: string }[] = [
-  { value: "B2B_UNIT", hint: "Highest priority: price for one ordering unit" },
-  { value: "SOLD_TO", hint: "For all units with this Sold-to" },
-];
+const SCOPE_HINTS: Record<PriceConditionScope, string> = {
+  B2B_UNIT: "Highest priority: price for one ordering unit",
+  SOLD_TO: "For all units with this Sold-to",
+  SALES_AREA: "List price for all customers of the sales area",
+};
 
 /**
  * Side panel for creating a price condition (no `condition` given) or
- * editing one. Material, level, Sold-to or unit and currency are fixed after
- * creation; amount, validity and status can be changed.
+ * editing one. Sales area, condition type, material, level, Sold-to or unit
+ * and currency are fixed after creation; amount, validity and status can be
+ * changed. The currency always comes from the sales area (ERP API).
  */
 export function PriceConditionForm({
   condition,
   conditionTypes,
   conditionTypesError,
+  salesAreas,
+  salesAreasError,
   materials,
   customers,
   units,
@@ -72,6 +83,9 @@ export function PriceConditionForm({
   /** null while loading */
   conditionTypes: ConditionType[] | null;
   conditionTypesError: string | null;
+  /** null while loading */
+  salesAreas: SalesArea[] | null;
+  salesAreasError: string | null;
   materials: Material[] | null;
   customers: Customer[] | null;
   units: B2bUnit[] | null;
@@ -93,8 +107,11 @@ export function PriceConditionForm({
   // A ref changes immediately, so a fast double click cannot submit twice
   const submittingRef = useRef(false);
 
+  const area = salesAreaById(salesAreas, values.salesArea);
+  const decimals = area?.currencyDecimals;
   const clientErrors = validatePriceConditionForm(values, {
     mode,
+    salesAreas: salesAreas ?? [],
     materials: materials ?? [],
     customers: customers ?? [],
     units: units ?? [],
@@ -140,8 +157,11 @@ export function PriceConditionForm({
     setIsSubmitting(true);
     try {
       const saved = condition
-        ? await updatePriceCondition(condition.conditionId, toUpdateInput(values))
-        : await createPriceCondition(toCreateInput(values, materials ?? []));
+        ? await updatePriceCondition(
+            condition.conditionId,
+            toUpdateInput(values, decimals),
+          )
+        : await createPriceCondition(toCreateInput(values, decimals));
       onSaved(saved, mode);
     } catch (error) {
       // Keep all user input so nothing is lost after an error
@@ -197,9 +217,35 @@ export function PriceConditionForm({
     setGeneralError(error.messages);
   }
 
-  const material = materials?.find((m) => m.materialNumber === values.materialNumber);
-  const currency = condition?.currency ?? material?.currency;
+  // The currency is decided by the ERP API: the currency of the sales area
+  const currency = condition?.currency ?? area?.currency;
+  const selectedType = conditionTypes?.find(
+    (t) => t.code === values.conditionTypeCode,
+  );
+  // Levels the selected condition type may use (configuration); all levels
+  // are shown, the others disabled with a reason
+  const allowedScopes = selectedType ? scopesOf(selectedType) : SCOPE_ORDER;
   const warnings = condition ? conditionWarnings(condition) : [];
+
+  /**
+   * A new condition type keeps the level only if it is allowed for it; a
+   * type with exactly one level (e.g. ZP01: sales area) selects it
+   */
+  function chooseConditionType(code: string) {
+    const type = conditionTypes?.find((t) => t.code === code);
+    const scopes = scopesOf(type);
+    const scope: PriceConditionScope | "" =
+      values.scope !== "" && scopes.includes(values.scope)
+        ? values.scope
+        : scopes.length === 1
+          ? scopes[0]
+          : "";
+    change(
+      scope === values.scope
+        ? { conditionTypeCode: code }
+        : { conditionTypeCode: code, scope, soldToCustomerNumber: "", unitId: "" },
+    );
+  }
   const title = condition
     ? `Edit Price Condition ${condition.conditionId}`
     : "New Price Condition";
@@ -227,6 +273,53 @@ export function PriceConditionForm({
             </div>
           )}
 
+          {/* Sales area: the market of the price, chosen first */}
+          <Field
+            id="salesArea"
+            label="Sales Area"
+            error={visibleError("salesArea")}
+            hint={
+              mode === "edit"
+                ? "Cannot be changed."
+                : "The market of the price. Its currency is used; customers and units must belong to it."
+            }
+          >
+            {condition ? (
+              <ReadOnly>
+                <span data-read-only-sales-area className="font-mono">
+                  {salesAreaId(condition.salesArea)}
+                </span>
+                {area ? ` – ${area.salesOrganizationName} (${area.currency})` : ""}
+              </ReadOnly>
+            ) : (
+              <select
+                id="salesArea"
+                value={values.salesArea}
+                disabled={salesAreas === null}
+                onChange={(e) =>
+                  // Customers and units of another market do not fit any more
+                  change({ salesArea: e.target.value, soldToCustomerNumber: "", unitId: "" })
+                }
+                onBlur={() => touch("salesArea")}
+                className={`${inputClass(visibleError("salesArea"))} bg-surface`}
+              >
+                <option value="">
+                  {salesAreas === null
+                    ? salesAreasError
+                      ? "Sales areas could not be loaded"
+                      : "Loading sales areas…"
+                    : "Select a sales area"}
+                </option>
+                {salesAreas?.map((a) => (
+                  <option key={salesAreaId(a)} value={salesAreaId(a)} disabled={!a.isActive}>
+                    {salesAreaLabel(a)}
+                    {a.isActive ? "" : " (inactive)"}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+
           {/* Condition type: what kind of price this record is */}
           <Field
             id="conditionTypeCode"
@@ -235,7 +328,7 @@ export function PriceConditionForm({
             hint={
               mode === "edit"
                 ? "Cannot be changed."
-                : "Only condition types that are usable for condition records can be selected."
+                : "Only usable condition types can be selected. The type decides the possible levels."
             }
           >
             {condition ? (
@@ -250,7 +343,7 @@ export function PriceConditionForm({
                 id="conditionTypeCode"
                 value={values.conditionTypeCode}
                 disabled={conditionTypes === null}
-                onChange={(e) => change({ conditionTypeCode: e.target.value })}
+                onChange={(e) => chooseConditionType(e.target.value)}
                 onBlur={() => touch("conditionTypeCode")}
                 className={`${inputClass(visibleError("conditionTypeCode"))} bg-surface`}
               >
@@ -268,7 +361,9 @@ export function PriceConditionForm({
                     disabled={!type.usableForPriceConditions}
                   >
                     {conditionTypeLabel(type)}
-                    {type.restriction ? ` (${RESTRICTION_TEXTS[type.restriction]})` : ""}
+                    {type.restriction
+                      ? ` (${RESTRICTION_TEXTS[type.restriction]})`
+                      : ` – ${scopesOf(type).map((scope) => SCOPE_LABELS[scope]).join(" or ")}`}
                   </option>
                 ))}
               </select>
@@ -280,13 +375,7 @@ export function PriceConditionForm({
             id="materialNumber"
             label="Material"
             error={visibleError("materialNumber")}
-            hint={
-              mode === "edit"
-                ? "Cannot be changed."
-                : material
-                  ? `Base price ${formatAmount(material.price.toFixed(2))} ${material.currency} (fallback if no condition applies)`
-                  : undefined
-            }
+            hint={mode === "edit" ? "Cannot be changed." : undefined}
           >
             {condition ? (
               <ReadOnly>
@@ -308,7 +397,7 @@ export function PriceConditionForm({
                 </option>
                 {materials?.map((m) => (
                   <option key={m.materialNumber} value={m.materialNumber}>
-                    {m.materialNumber} – {m.description} ({m.currency})
+                    {m.materialNumber} – {m.description}
                   </option>
                 ))}
               </select>
@@ -321,32 +410,42 @@ export function PriceConditionForm({
             {condition ? (
               <ReadOnly>{SCOPE_LABELS[condition.scope]} price</ReadOnly>
             ) : (
-              <div role="radiogroup" className="grid gap-2 sm:grid-cols-2">
-                {SCOPES.map((scope) => (
-                  <label
-                    key={scope.value}
-                    className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 ${
-                      values.scope === scope.value
-                        ? "border-brand bg-brand-soft/40"
-                        : "border-line hover:bg-canvas"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="scope"
-                      value={scope.value}
-                      checked={values.scope === scope.value}
-                      onChange={() =>
-                        change({ scope: scope.value, soldToCustomerNumber: "", unitId: "" })
-                      }
-                      className="mt-1 accent-brand"
-                    />
-                    <span>
-                      <span className="block font-medium">{SCOPE_LABELS[scope.value]}</span>
-                      <span className="block text-xs text-ink-muted">{scope.hint}</span>
-                    </span>
-                  </label>
-                ))}
+              <div role="radiogroup" className="grid gap-2 sm:grid-cols-3">
+                {SCOPE_ORDER.map((scope) => {
+                  const isAllowed = allowedScopes.includes(scope);
+                  return (
+                    <label
+                      key={scope}
+                      className={`flex items-start gap-2 rounded-md border px-3 py-2 ${
+                        !isAllowed
+                          ? "cursor-not-allowed border-line text-ink-muted opacity-60"
+                          : values.scope === scope
+                            ? "cursor-pointer border-brand bg-brand-soft/40"
+                            : "cursor-pointer border-line hover:bg-canvas"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="scope"
+                        value={scope}
+                        checked={values.scope === scope}
+                        disabled={!isAllowed}
+                        onChange={() =>
+                          change({ scope, soldToCustomerNumber: "", unitId: "" })
+                        }
+                        className="mt-1 accent-brand"
+                      />
+                      <span>
+                        <span className="block font-medium">{SCOPE_LABELS[scope]}</span>
+                        <span className="block text-xs text-ink-muted">
+                          {isAllowed
+                            ? SCOPE_HINTS[scope]
+                            : `Not configured for ${selectedType?.code}`}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             )}
             {visibleError("scope") && (
@@ -356,13 +455,28 @@ export function PriceConditionForm({
             )}
           </fieldset>
 
+          {values.scope === "SALES_AREA" && (
+            <p
+              data-list-price-hint
+              className="rounded-md border border-line bg-canvas px-3 py-2 text-xs text-ink-muted"
+            >
+              List price for all customers of sales area{" "}
+              <span className="font-mono">{values.salesArea}</span>. It is used
+              when no B2B unit or Sold-to price applies.
+            </p>
+          )}
+
           {/* Sold-to or unit */}
           {values.scope === "B2B_UNIT" && (
             <Field
               id="unitId"
               label="B2B Unit"
               error={visibleError("unitId")}
-              hint={mode === "edit" ? "Cannot be changed." : "Only active units with an active Sold-to."}
+              hint={
+                mode === "edit"
+                  ? "Cannot be changed."
+                  : `Only active units of sales area ${values.salesArea} with an active Sold-to.`
+              }
             >
               {condition?.unit ? (
                 <ReadOnly>
@@ -379,7 +493,7 @@ export function PriceConditionForm({
                   className={`${inputClass(visibleError("unitId"))} bg-surface`}
                 >
                   <option value="">{units === null ? "Loading B2B units…" : "Select a B2B unit"}</option>
-                  {unitOptions(units ?? []).map((u) => (
+                  {unitOptions(units ?? [], values.salesArea).map((u) => (
                     <option key={u.unitId} value={u.unitId} disabled={!u.isSelectable}>
                       {u.unitId} – {u.name} (Sold-to {u.soldToCustomerNumber})
                       {u.note ? ` – ${u.note}` : ""}
@@ -398,7 +512,7 @@ export function PriceConditionForm({
               hint={
                 mode === "edit"
                   ? "Cannot be changed."
-                  : "Applies to all B2B units with this Sold-to, unless a unit has its own price."
+                  : `Applies to all B2B units with this Sold-to, unless a unit has its own price. Only customers active in sales area ${values.salesArea}.`
               }
             >
               {condition?.soldTo ? (
@@ -416,10 +530,10 @@ export function PriceConditionForm({
                   className={`${inputClass(visibleError("soldToCustomerNumber"))} bg-surface`}
                 >
                   <option value="">{customers === null ? "Loading customers…" : "Select a customer"}</option>
-                  {soldToOptions(customers ?? []).map((c) => (
-                    <option key={c.customerNumber} value={c.customerNumber} disabled={!c.isActive}>
+                  {soldToOptions(customers ?? [], values.salesArea).map((c) => (
+                    <option key={c.customerNumber} value={c.customerNumber} disabled={!c.isSelectable}>
                       {c.customerNumber} – {c.name}
-                      {c.isActive ? "" : " (inactive)"}
+                      {c.note ? ` (${c.note})` : ""}
                     </option>
                   ))}
                 </select>
@@ -432,19 +546,27 @@ export function PriceConditionForm({
             id="amount"
             label="Price per piece"
             error={visibleError("amount")}
-            hint="Up to two decimal places, e.g. 4200.50."
+            hint={
+              decimals === 0
+                ? `Whole amounts only: ${currency} has no decimal places.`
+                : `Up to two decimal places, e.g. 4200.50. The currency comes from the sales area.`
+            }
           >
             <div className="flex items-stretch">
               <input
                 id="amount"
-                inputMode="decimal"
+                inputMode={decimals === 0 ? "numeric" : "decimal"}
                 autoComplete="off"
                 value={values.amount}
                 onChange={(e) => change({ amount: e.target.value })}
                 onBlur={() => touch("amount")}
                 className={`${inputClass(visibleError("amount"))} rounded-r-none text-right tabular-nums`}
               />
-              <span className="inline-flex items-center rounded-r-md border border-l-0 border-line bg-canvas px-3 font-mono text-ink-muted">
+              <span
+                data-currency
+                title="Currency of the sales area; it cannot be changed"
+                className="inline-flex items-center rounded-r-md border border-l-0 border-line bg-canvas px-3 font-mono text-ink-muted"
+              >
                 {currency ?? "—"}
               </span>
             </div>

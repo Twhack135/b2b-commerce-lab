@@ -1,4 +1,5 @@
 import { erpFetch } from "./erp-api";
+import type { PriceConditionScope } from "./price-conditions";
 
 // Condition types as returned by the ERP API (see apps/erp-api
 // condition-types). Read-only configuration, e.g. ZP02 Customer Net Price.
@@ -28,6 +29,11 @@ export type ConditionType = ConditionTypeSummary & {
   /** True if new price condition records may use this type */
   usableForPriceConditions: boolean;
   restriction: ConditionRecordRestriction | null;
+  /**
+   * The scopes records of this type may use (configuration of the ERP API),
+   * e.g. ["SALES_AREA"] for ZP01 and ["B2B_UNIT", "SOLD_TO"] for ZP02
+   */
+  allowedScopes: PriceConditionScope[];
 };
 
 export function listConditionTypes() {

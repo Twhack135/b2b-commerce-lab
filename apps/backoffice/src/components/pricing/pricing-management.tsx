@@ -9,12 +9,15 @@ import { listMaterials } from "@/lib/materials";
 import {
   filterConditions,
   SCOPE_LABELS,
+  SCOPE_ORDER,
 } from "@/lib/price-condition-form";
 import {
   listPriceConditions,
   type PriceCondition,
   type PriceConditionScope,
 } from "@/lib/price-conditions";
+import { salesAreaId, salesAreaLabel } from "@/lib/sales-area-display";
+import { listSalesAreas } from "@/lib/sales-areas";
 import { useListData } from "@/lib/use-list-data";
 import { useToday } from "@/lib/use-today";
 import {
@@ -50,10 +53,13 @@ export function PricingManagement() {
   const customers = useListData(listCustomers);
   const units = useListData(listB2bUnits);
   const conditionTypes = useListData(listConditionTypes);
+  // Markets with their currencies and decimal places
+  const salesAreas = useListData(listSalesAreas);
   const today = useToday();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
+  const [salesAreaFilter, setSalesAreaFilter] = useState("");
   const [materialFilter, setMaterialFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState<PriceConditionScope | "">("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -66,6 +72,7 @@ export function PricingManagement() {
     customers.reload();
     units.reload();
     conditionTypes.reload();
+    salesAreas.reload();
   }
 
   function open(next: Panel) {
@@ -85,6 +92,7 @@ export function PricingManagement() {
 
   const all = conditions.items ?? [];
   const visible = filterConditions(all, {
+    salesArea: salesAreaFilter,
     materialNumber: materialFilter,
     scope: scopeFilter,
     conditionTypeCode: typeFilter,
@@ -94,6 +102,7 @@ export function PricingManagement() {
   const isFiltered =
     search.trim() !== "" ||
     statusFilter !== "all" ||
+    salesAreaFilter !== "" ||
     materialFilter !== "" ||
     scopeFilter !== "" ||
     typeFilter !== "";
@@ -111,7 +120,7 @@ export function PricingManagement() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Pricing"
-        description="Customer-specific material prices. Priority: B2B unit price, then Sold-to price, then the material's base price."
+        description="Material prices per sales area. Priority: B2B unit price, then Sold-to price, then the list price (ZP01) of the sales area."
         actionLabel="New Price Condition"
         onAction={() => open({ kind: "create" })}
         secondaryAction={{
@@ -147,6 +156,23 @@ export function PricingManagement() {
           />
 
           <label className="flex items-center gap-1.5 text-xs text-ink-muted">
+            Sales area
+            <select
+              aria-label="Filter by sales area"
+              value={salesAreaFilter}
+              onChange={(e) => setSalesAreaFilter(e.target.value)}
+              className={filterSelectClass}
+            >
+              <option value="">All</option>
+              {salesAreas.items?.map((area) => (
+                <option key={salesAreaId(area)} value={salesAreaId(area)}>
+                  {salesAreaLabel(area)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-1.5 text-xs text-ink-muted">
             Material
             <select
               aria-label="Filter by material"
@@ -172,7 +198,7 @@ export function PricingManagement() {
               className={filterSelectClass}
             >
               <option value="">All</option>
-              {(Object.keys(SCOPE_LABELS) as PriceConditionScope[]).map((scope) => (
+              {SCOPE_ORDER.map((scope) => (
                 <option key={scope} value={scope}>
                   {SCOPE_LABELS[scope]}
                 </option>
@@ -200,7 +226,7 @@ export function PricingManagement() {
           <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
             <SearchInput
               label="Search price conditions"
-              placeholder="Search material, Sold-to or unit"
+              placeholder="Search material, customer, unit or sales area"
               value={search}
               onChange={setSearch}
             />
@@ -223,7 +249,7 @@ export function PricingManagement() {
         ) : conditions.items.length === 0 ? (
           <EmptyState
             title="No price conditions yet"
-            text="Without conditions, every B2B unit gets the material's base price. Create the first condition to give a unit or Sold-to its own price."
+            text="Without conditions, no material has a price. Create a list price (ZP01) for a sales area, or a price for a Sold-to or B2B unit."
           />
         ) : visible.length === 0 ? (
           <EmptyState
@@ -233,6 +259,7 @@ export function PricingManagement() {
         ) : (
           <PriceConditionTable
             conditions={visible}
+            salesAreas={salesAreas.items}
             today={today}
             onSelect={(condition) => open({ kind: "edit", condition })}
           />
@@ -251,6 +278,8 @@ export function PricingManagement() {
           condition={panel.kind === "edit" ? panel.condition : undefined}
           conditionTypes={conditionTypes.items}
           conditionTypesError={conditionTypes.loadError}
+          salesAreas={salesAreas.items}
+          salesAreasError={salesAreas.loadError}
           materials={materials.items}
           customers={customers.items}
           units={units.items}
@@ -261,6 +290,8 @@ export function PricingManagement() {
 
       {panel?.kind === "check" && (
         <PriceCheckPanel
+          salesAreas={salesAreas.items}
+          salesAreasError={salesAreas.loadError}
           materials={materials.items}
           units={units.items}
           onClose={() => setPanel(null)}

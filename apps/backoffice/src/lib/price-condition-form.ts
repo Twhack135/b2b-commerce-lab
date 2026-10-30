@@ -16,14 +16,40 @@ import type {
   PriceConditionScope,
   UpdatePriceConditionInput,
 } from "./price-conditions.ts";
+import {
+  assignmentStatus,
+  DEFAULT_SALES_AREA_ID,
+  parseSalesAreaId,
+  salesAreaById,
+  salesAreaId,
+} from "./sales-area-display.ts";
+import type { SalesArea } from "./sales-areas.ts";
 
 export const SCOPE_LABELS: Record<PriceConditionScope, string> = {
   B2B_UNIT: "B2B Unit",
   SOLD_TO: "Sold-to",
+  SALES_AREA: "Sales area",
 };
+
+/** Order of the levels in the price determination, highest priority first */
+export const SCOPE_ORDER: PriceConditionScope[] = [
+  "B2B_UNIT",
+  "SOLD_TO",
+  "SALES_AREA",
+];
+
+/**
+ * The scopes a condition type may be used with, as configured in the ERP
+ * API (e.g. ZP01 only for the sales area), in the order of the levels
+ */
+export function scopesOf(type: ConditionType | undefined): PriceConditionScope[] {
+  return SCOPE_ORDER.filter((scope) => type?.allowedScopes.includes(scope));
+}
 
 /** Field names are the ERP API names, so API errors map 1:1 */
 export type PriceConditionFormValues = {
+  /** Sales area as "1000/10/00"; chosen first, fixed afterwards */
+  salesArea: string;
   /** e.g. ZP02; chosen when creating, fixed afterwards */
   conditionTypeCode: string;
   materialNumber: string;
@@ -47,6 +73,8 @@ export type PriceConditionFieldErrors = Partial<
 >;
 
 export const PRICE_CONDITION_FIELDS: PriceConditionFormField[] = [
+  // ERP API messages such as "salesArea 1000/20/00 does not exist"
+  "salesArea",
   "conditionTypeCode",
   "materialNumber",
   "scope",
@@ -59,15 +87,23 @@ export const PRICE_CONDITION_FIELDS: PriceConditionFormField[] = [
 
 /** Readable names for ERP API messages such as "unitId U1 is inactive" */
 export const PRICE_CONDITION_LABELS: Partial<Record<PriceConditionFormField, string>> = {
+  salesArea: "Sales area",
   conditionTypeCode: "Condition type",
   materialNumber: "Material",
   soldToCustomerNumber: "Sold-to",
   unitId: "B2B unit",
 };
 
-/** A new condition starts today and is open-ended */
-export function emptyConditionForm(today: string): PriceConditionFormValues {
+/**
+ * A new condition starts today and is open-ended, in the German sales area
+ * unless the user chooses another one
+ */
+export function emptyConditionForm(
+  today: string,
+  salesArea: string = DEFAULT_SALES_AREA_ID,
+): PriceConditionFormValues {
   return {
+    salesArea,
     conditionTypeCode: "",
     materialNumber: "",
     scope: "",
@@ -84,6 +120,7 @@ export function conditionToForm(
   condition: PriceCondition,
 ): PriceConditionFormValues {
   return {
+    salesArea: salesAreaId(condition.salesArea),
     conditionTypeCode: condition.conditionType.code,
     materialNumber: condition.materialNumber,
     scope: condition.scope,
@@ -100,6 +137,10 @@ export type SoldToOption = {
   customerNumber: string;
   name: string;
   isActive: boolean;
+  /** Active and actively assigned to the sales area */
+  isSelectable: boolean;
+  /** Why the customer cannot be selected */
+  note?: string;
 };
 
 export type UnitOption = {
@@ -112,16 +153,42 @@ export type UnitOption = {
   note?: string;
 };
 
-export function soldToOptions(customers: Customer[]): SoldToOption[] {
-  return customers.map((c) => ({
-    customerNumber: c.customerNumber,
-    name: c.name,
-    isActive: c.isActive,
-  }));
+/**
+ * Customers as Sold-to of a price in the sales area: only active customers
+ * that are actively assigned to it can get a new price (as in the ERP API)
+ */
+export function soldToOptions(
+  customers: Customer[],
+  salesArea: string,
+): SoldToOption[] {
+  const key = parseSalesAreaId(salesArea);
+  return customers.map((c) => {
+    const status = key ? assignmentStatus(c.salesAreas, key) : "missing";
+    const note = !c.isActive
+      ? "inactive"
+      : status === "missing"
+        ? "not assigned to the sales area"
+        : status === "inactive"
+          ? "inactive in the sales area"
+          : undefined;
+    return {
+      customerNumber: c.customerNumber,
+      name: c.name,
+      isActive: c.isActive,
+      isSelectable: note === undefined,
+      note,
+    };
+  });
 }
 
-export function unitOptions(units: B2bUnit[]): UnitOption[] {
-  return units.map((unit) => ({
+/**
+ * B2B units of the sales area only: a unit is never priced or given a
+ * price in another market
+ */
+export function unitOptions(units: B2bUnit[], salesArea: string): UnitOption[] {
+  return units
+    .filter((unit) => salesAreaId(unit.salesArea) === salesArea)
+    .map((unit) => ({
     unitId: unit.unitId,
     name: unit.name,
     soldToCustomerNumber: unit.soldTo.customerNumber,
@@ -136,6 +203,8 @@ export function unitOptions(units: B2bUnit[]): UnitOption[] {
 
 type ValidationContext = {
   mode: "create" | "edit";
+  /** Configured sales areas; may be missing while they load */
+  salesAreas?: SalesArea[];
   materials: Material[];
   customers: Customer[];
   units: B2bUnit[];
@@ -147,9 +216,19 @@ type ValidationContext = {
 
 export function validatePriceConditionForm(
   values: PriceConditionFormValues,
-  { mode, materials, customers, units, conditionTypes = [], original }: ValidationContext,
+  {
+    mode,
+    salesAreas = [],
+    materials,
+    customers,
+    units,
+    conditionTypes = [],
+    original,
+  }: ValidationContext,
 ): PriceConditionFieldErrors {
   const errors: PriceConditionFieldErrors = {};
+  const area = salesAreaById(salesAreas, values.salesArea);
+  const key = parseSalesAreaId(values.salesArea);
 
   // A new or reactivated condition needs an active Sold-to or unit, and a
   // unit also needs an active Sold-to. An active condition may keep a
@@ -158,8 +237,13 @@ export function validatePriceConditionForm(
     mode === "create" || (values.isActive && original?.isActive === false);
 
   if (mode === "create") {
-    // Whether a type can be used is decided by the ERP API and shown in
-    // usableForPriceConditions; the form only repeats that answer
+    if (!key) {
+      errors.salesArea = "Select a sales area.";
+    } else if (area && !area.isActive) {
+      errors.salesArea = "This sales area is inactive and cannot get new prices.";
+    }
+    // Whether a type can be used, and with which scopes, is decided by the
+    // ERP API (usableForPriceConditions, allowedScopes); the form repeats it
     const conditionType = conditionTypes.find(
       (t) => t.code === values.conditionTypeCode,
     );
@@ -174,7 +258,12 @@ export function validatePriceConditionForm(
       errors.materialNumber = `Material ${values.materialNumber} does not exist.`;
     }
     if (values.scope === "") {
-      errors.scope = "Select whether the price is for a B2B unit or a Sold-to.";
+      errors.scope = "Select the level of the price.";
+    } else if (
+      conditionType &&
+      !conditionType.allowedScopes.includes(values.scope)
+    ) {
+      errors.scope = `Condition type ${conditionType.code} cannot be used for the level ${SCOPE_LABELS[values.scope]}.`;
     }
   }
 
@@ -183,13 +272,23 @@ export function validatePriceConditionForm(
     if (number === "") {
       errors.soldToCustomerNumber = "Select a Sold-to customer.";
     } else if (needsActivePartners) {
-      const customer =
-        customers.find((c) => c.customerNumber === number) ??
-        (original?.soldTo ?? undefined);
+      // The loaded customer knows its sales areas; the stored partner only
+      // its status, if the customer list is not available
+      const loaded = customers.find((c) => c.customerNumber === number);
+      const customer = loaded ?? original?.soldTo ?? undefined;
       if (!customer) {
         errors.soldToCustomerNumber = `Customer ${number} does not exist.`;
       } else if (!customer.isActive) {
         errors.soldToCustomerNumber = `Customer ${number} is inactive. Only active customers can get an active price.`;
+      } else if (key && loaded) {
+        // Prices exist per market: the Sold-to must be active in it
+        const status = assignmentStatus(loaded.salesAreas, key);
+        if (status !== "active") {
+          errors.soldToCustomerNumber =
+            status === "missing"
+              ? `Customer ${number} is not assigned to sales area ${values.salesArea}.`
+              : `Customer ${number} is inactive in sales area ${values.salesArea}.`;
+        }
       }
     }
   }
@@ -199,10 +298,15 @@ export function validatePriceConditionForm(
     if (unitId === "") {
       errors.unitId = "Select a B2B unit.";
     } else if (needsActivePartners) {
-      const unit =
-        units.find((u) => u.unitId === unitId) ?? (original?.unit ?? undefined);
+      const loaded = units.find((u) => u.unitId === unitId);
+      const unit = loaded ?? original?.unit ?? undefined;
       if (!unit) {
         errors.unitId = `B2B unit ${unitId} does not exist.`;
+      } else if (
+        loaded &&
+        salesAreaId(loaded.salesArea) !== values.salesArea
+      ) {
+        errors.unitId = `B2B unit ${unitId} belongs to sales area ${salesAreaId(loaded.salesArea)}, not ${values.salesArea}.`;
       } else if (!unit.isActive) {
         errors.unitId = `B2B unit ${unitId} is inactive. Only active units can get an active price.`;
       } else if (!unit.soldTo.isActive) {
@@ -211,7 +315,8 @@ export function validatePriceConditionForm(
     }
   }
 
-  const amount = amountError(values.amount);
+  // With the decimal places of the currency of the sales area (JPY: none)
+  const amount = amountError(values.amount, area?.currencyDecimals);
   if (amount) errors.amount = amount;
 
   if (values.validFrom === "") {
@@ -230,28 +335,30 @@ export function validatePriceConditionForm(
   return errors;
 }
 
-/** Only call this for values without errors */
+/**
+ * Only call this for values without errors. The currency is never sent:
+ * the ERP API always takes the currency of the sales area.
+ */
 export function toCreateInput(
   values: PriceConditionFormValues,
-  materials: Material[],
+  currencyDecimals?: number,
 ): CreatePriceConditionInput {
-  const material = materials.find(
-    (m) => m.materialNumber === values.materialNumber,
-  );
-  if (!material || values.scope === "") {
+  const key = parseSalesAreaId(values.salesArea);
+  if (!key || values.scope === "") {
     throw new Error("toCreateInput needs validated values");
   }
   return {
+    ...key,
     conditionTypeCode: values.conditionTypeCode,
     materialNumber: values.materialNumber,
     scope: values.scope,
-    // Only the key of the chosen scope is sent
+    // Only the key of the chosen scope is sent; a list price has none
     ...(values.scope === "SOLD_TO"
       ? { soldToCustomerNumber: values.soldToCustomerNumber }
-      : { unitId: values.unitId }),
-    amount: normalizeAmount(values.amount),
-    // Always the currency of the material; it cannot be chosen
-    currency: material.currency,
+      : values.scope === "B2B_UNIT"
+        ? { unitId: values.unitId }
+        : {}),
+    amount: normalizeAmount(values.amount, currencyDecimals),
     validFrom: values.validFrom,
     validTo: values.validTo === "" ? null : values.validTo,
     isActive: values.isActive,
@@ -261,9 +368,10 @@ export function toCreateInput(
 /** Only call this for values without errors */
 export function toUpdateInput(
   values: PriceConditionFormValues,
+  currencyDecimals?: number,
 ): UpdatePriceConditionInput {
   return {
-    amount: normalizeAmount(values.amount),
+    amount: normalizeAmount(values.amount, currencyDecimals),
     validFrom: values.validFrom,
     validTo: values.validTo === "" ? null : values.validTo,
     isActive: values.isActive,
@@ -319,6 +427,8 @@ export function conditionWarnings(condition: PriceCondition): string[] {
 }
 
 export type ConditionFilter = {
+  /** "" for all sales areas, otherwise e.g. "1000/10/00" */
+  salesArea?: string;
   /** "" for all materials */
   materialNumber: string;
   /** "" for all scopes */
@@ -336,6 +446,7 @@ export function filterConditions(
   const query = filter.search.trim().toLowerCase();
   return conditions.filter(
     (c) =>
+      (!filter.salesArea || salesAreaId(c.salesArea) === filter.salesArea) &&
       (filter.materialNumber === "" ||
         c.materialNumber === filter.materialNumber) &&
       (filter.scope === "" || c.scope === filter.scope) &&
@@ -343,6 +454,7 @@ export function filterConditions(
         c.conditionType.code === filter.conditionTypeCode) &&
       (filter.status === "all" || c.isActive === (filter.status === "active")) &&
       [
+        salesAreaId(c.salesArea),
         c.conditionType.code,
         c.conditionType.name,
         c.materialNumber,

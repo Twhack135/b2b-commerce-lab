@@ -1,4 +1,4 @@
-import { formatAmount } from "@/lib/money";
+import { formatApiAmount } from "@/lib/money";
 import { SOURCE_LABELS } from "@/lib/price-check";
 import type {
   SalesOrderSimulation,
@@ -13,6 +13,7 @@ import {
   STATUS_TEXT,
   totalToShow,
 } from "@/lib/simulation-display";
+import { salesAreaId } from "@/lib/sales-area-display";
 import { AlertIcon, CheckIcon, CloseIcon } from "../icons";
 import { PricingAnalysis } from "../pricing/pricing-analysis";
 
@@ -36,9 +37,12 @@ const SEVERITY_STYLES: Record<SimulationMessage["severity"], string> = {
 export function SimulationResult({
   result,
   isOutdated,
+  decimals,
 }: {
   result: SalesOrderSimulation;
   isOutdated: boolean;
+  /** Decimal places of the document currency, e.g. 0 for JPY */
+  decimals?: number;
 }) {
   const total = totalToShow(result);
   const { performed, notPerformed } = splitChecks(result.checks);
@@ -75,7 +79,19 @@ export function SimulationResult({
         </div>
 
         {/* The header data as applied by the ERP API */}
-        <dl className="grid gap-x-6 gap-y-2 rounded-lg border border-line bg-surface px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
+        <dl className="grid gap-x-6 gap-y-2 rounded-lg border border-line bg-surface px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <dt className="text-xs text-ink-muted">Sales area</dt>
+            <dd data-result-sales-area className="font-mono">
+              {salesAreaId(result.salesArea)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-ink-muted">Document currency</dt>
+            <dd data-result-currency className="font-mono">
+              {result.currency ?? "—"}
+            </dd>
+          </div>
           <div>
             <dt className="text-xs text-ink-muted">Order date</dt>
             <dd data-result-order-date className="font-mono tabular-nums">
@@ -133,7 +149,7 @@ export function SimulationResult({
 
         {result.messages.length > 0 && <MessageList messages={result.messages} />}
 
-        <ItemTable result={result} />
+        <ItemTable result={result} decimals={decimals} />
 
         <div
           data-total
@@ -143,7 +159,7 @@ export function SimulationResult({
             <>
               <span className="text-ink-muted">Net value</span>
               <span className="text-xl font-semibold tabular-nums">
-                {formatAmount(total.netValue)} {total.currency}
+                {formatApiAmount(total.netValue, decimals)} {total.currency}
               </span>
               <span className="text-xs text-ink-muted">excl. VAT and freight</span>
             </>
@@ -215,7 +231,13 @@ function MessageList({ messages }: { messages: SimulationMessage[] }) {
   );
 }
 
-function ItemTable({ result }: { result: SalesOrderSimulation }) {
+function ItemTable({
+  result,
+  decimals,
+}: {
+  result: SalesOrderSimulation;
+  decimals?: number;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-line bg-surface">
       <table className="w-full text-left">
@@ -247,7 +269,7 @@ function ItemTable({ result }: { result: SalesOrderSimulation }) {
                     )}
                     {SOURCE_LABELS[item.pricing.source]}
                     <span className="sm:hidden">
-                      {" "}· {item.unitPrice && formatAmount(item.unitPrice)} {item.currency} each
+                      {" "}· {item.unitPrice && formatApiAmount(item.unitPrice, decimals)} {item.currency} each
                     </span>
                   </div>
                 )}
@@ -262,19 +284,24 @@ function ItemTable({ result }: { result: SalesOrderSimulation }) {
                       Pricing analysis
                     </summary>
                     <div className="mt-2 max-w-xl">
-                      <PricingAnalysis steps={item.pricing.steps} currency={item.currency} showTitle={false} />
+                      <PricingAnalysis
+                        steps={item.pricing.steps}
+                        currency={item.currency}
+                        decimals={decimals}
+                        showTitle={false}
+                      />
                     </div>
                   </details>
                 )}
               </td>
               <td className="px-3 py-3 text-right tabular-nums sm:px-4">{item.quantity}</td>
               <td className="hidden px-3 py-3 text-right whitespace-nowrap tabular-nums sm:table-cell sm:px-4">
-                {item.unitPrice ? `${formatAmount(item.unitPrice)} ${item.currency}` : "—"}
+                {item.unitPrice ? `${formatApiAmount(item.unitPrice, decimals)} ${item.currency}` : "—"}
               </td>
               <td className="px-3 py-3 text-right font-medium whitespace-nowrap tabular-nums sm:px-4">
                 {item.netValue ? (
                   <>
-                    {formatAmount(item.netValue)} <span className="text-xs font-normal text-ink-muted">{item.currency}</span>
+                    {formatApiAmount(item.netValue, decimals)} <span className="text-xs font-normal text-ink-muted">{item.currency}</span>
                   </>
                 ) : (
                   "—"
@@ -290,9 +317,7 @@ function ItemTable({ result }: { result: SalesOrderSimulation }) {
                         <span className="text-ink-muted">{item.pricing.conditionType.name}</span>
                       </div>
                     )}
-                    {item.pricing.conditionId !== null && (
-                      <div className="text-xs text-ink-muted">condition {item.pricing.conditionId}</div>
-                    )}
+                    <div className="text-xs text-ink-muted">condition {item.pricing.conditionId}</div>
                   </>
                 ) : (
                   <span className="text-ink-muted">Not priced</span>

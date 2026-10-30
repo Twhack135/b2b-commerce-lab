@@ -6,6 +6,12 @@ import type {
   SalesAreaKey,
 } from "./sales-areas.ts";
 
+/**
+ * The German sales area, the default context where a page needs one. A user
+ * selection is never changed to it automatically.
+ */
+export const DEFAULT_SALES_AREA_ID = "1000/10/00";
+
 /** Compact key used in form values and messages, e.g. "1000/10/00" */
 export function salesAreaId(key: SalesAreaKey): string {
   return `${key.salesOrganization}/${key.distributionChannel}/${key.division}`;
@@ -71,4 +77,32 @@ export function assignableSalesAreas(
     (area) =>
       area.isActive && !assignments.some((a) => sameSalesArea(a, area)),
   );
+}
+
+/** The sales area of a compact id, if configured */
+export function salesAreaById(
+  areas: SalesArea[] | null | undefined,
+  id: string,
+): SalesArea | undefined {
+  const key = parseSalesAreaId(id);
+  return key ? findSalesArea(areas, key) : undefined;
+}
+
+/**
+ * Decimal places of a currency as configured in the ERP API (via the sales
+ * areas), e.g. 0 for JPY; undefined if no sales area uses the currency
+ */
+export function currencyDecimals(
+  areas: SalesArea[] | null | undefined,
+  currency: string,
+): number | undefined {
+  return areas?.find((area) => area.currency === currency)?.currencyDecimals;
+}
+
+/** Items that belong to the sales area, e.g. the B2B units of a market */
+export function inSalesArea<T extends { salesArea: SalesAreaKey }>(
+  items: T[],
+  id: string,
+): T[] {
+  return items.filter((item) => salesAreaId(item.salesArea) === id);
 }

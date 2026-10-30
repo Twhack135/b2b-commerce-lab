@@ -193,7 +193,6 @@ export function MaterialPicker({
                 >
                   <span className="font-mono text-sm">{option.materialNumber}</span>
                   <span className="ml-2 text-sm">{option.description}</span>
-                  <span className="ml-2 text-xs text-ink-muted">{option.currency}</span>
                 </li>
               ))}
             </ul>

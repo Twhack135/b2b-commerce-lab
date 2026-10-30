@@ -16,10 +16,12 @@ import {
   itemNumberAt,
   MAX_ITEMS,
   removeItem,
+  selectSalesArea,
   selectUnit,
   shipToOptions,
   toSimulationRequest,
   unitPartners,
+  unitsOfSalesArea,
   updateItem,
   validateSimulationForm,
   type OrderSimulationValues,
@@ -49,6 +51,14 @@ const stuttgart = (shipTos = [
   defaultShipToCustomerNumber: "CUST-1100",
 });
 
+/** A unit of the Müller account in Japan (isolated test data) */
+const osaka: B2bUnit = {
+  ...stuttgart(),
+  unitId: "UNIT-OSAKA",
+  name: "Müller – Osaka",
+  salesArea: { salesOrganization: "3000", distributionChannel: "10", division: "00" },
+};
+
 const units = [stuttgart()];
 
 /** Order date = pricing date, as passed in by the page (today) */
@@ -56,6 +66,7 @@ const ORDER_DATE = "2026-10-29";
 
 /** The Müller example order */
 const mueller = (): OrderSimulationValues => ({
+  salesArea: "1000/10/00",
   unitId: "UNIT-STUTTGART",
   shipToCustomerNumber: "CUST-1100",
   requestedDeliveryDate: "",
@@ -252,6 +263,9 @@ describe("toSimulationRequest", () => {
 
   it("sends exactly the fields of the ERP API with the explicit Ship-to", () => {
     assert.deepEqual(toSimulationRequest(mueller(), ORDER_DATE), {
+      salesOrganization: "1000",
+      distributionChannel: "10",
+      division: "00",
       unitId: "UNIT-STUTTGART",
       shipToCustomerNumber: "CUST-1100",
       pricingDate: "2026-10-29",
@@ -278,6 +292,90 @@ describe("toSimulationRequest", () => {
     assert.equal(request.customerReference, null);
     // The ERP API decides that whitespace is no note
     assert.equal(request.customerNote, "   ");
+  });
+});
+
+describe("sales area", () => {
+  const salesAreas = [
+    {
+      salesOrganization: "1000",
+      distributionChannel: "10",
+      division: "00",
+      salesOrganizationName: "B2B Lab Germany",
+      distributionChannelName: "Direct Sales",
+      divisionName: "Cross-Division",
+      country: "DE",
+      currency: "EUR",
+      currencyDecimals: 2,
+      isActive: true,
+    },
+    {
+      salesOrganization: "2000",
+      distributionChannel: "10",
+      division: "00",
+      salesOrganizationName: "B2B Lab Poland",
+      distributionChannelName: "Direct Sales",
+      divisionName: "Cross-Division",
+      country: "PL",
+      currency: "PLN",
+      currencyDecimals: 2,
+      isActive: false,
+    },
+  ];
+
+  it("starts in Germany unless another sales area is given", () => {
+    assert.equal(emptySimulationForm().salesArea, "1000/10/00");
+    assert.equal(emptySimulationForm("3000/10/00").salesArea, "3000/10/00");
+  });
+
+  it("offers only the units of the selected sales area", () => {
+    assert.deepEqual(
+      unitsOfSalesArea([stuttgart(), osaka], "3000/10/00").map((u) => u.unitId),
+      ["UNIT-OSAKA"],
+    );
+    assert.deepEqual(unitsOfSalesArea([stuttgart(), osaka], "2000/10/00"), []);
+  });
+
+  it("clears a unit of another market when the sales area changes", () => {
+    const changed = selectSalesArea(mueller(), "3000/10/00", [stuttgart(), osaka]);
+    assert.deepEqual(
+      [changed.salesArea, changed.unitId, changed.shipToCustomerNumber],
+      ["3000/10/00", "", ""],
+    );
+    // The positions stay: materials are the same in every market
+    assert.deepEqual(changed.items, mueller().items);
+  });
+
+  it("keeps the unit if it belongs to the new sales area", () => {
+    const values = { ...mueller(), salesArea: "", unitId: "UNIT-OSAKA" };
+    assert.equal(selectSalesArea(values, "3000/10/00", [stuttgart(), osaka]).unitId, "UNIT-OSAKA");
+  });
+
+  it("requires an active sales area and a unit of it", () => {
+    assert.equal(
+      validateSimulationForm({ ...mueller(), salesArea: "" }, units, ORDER_DATE, salesAreas).header.salesArea,
+      "Select a sales area.",
+    );
+    assert.equal(
+      validateSimulationForm({ ...mueller(), salesArea: "2000/10/00" }, units, ORDER_DATE, salesAreas).header.salesArea,
+      "Sales area 2000/10/00 is inactive.",
+    );
+    assert.equal(
+      validateSimulationForm({ ...mueller(), salesArea: "3000/10/00" }, units, ORDER_DATE, salesAreas).header.unitId,
+      "B2B unit UNIT-STUTTGART belongs to sales area 1000/10/00, not 3000/10/00.",
+    );
+    assert.deepEqual(validateSimulationForm(mueller(), units, ORDER_DATE, salesAreas).header, {});
+  });
+
+  it("marks a result outdated when the sales area changes", () => {
+    assert.notEqual(
+      inputKey(mueller(), ORDER_DATE),
+      inputKey({ ...mueller(), salesArea: "3000/10/00" }, ORDER_DATE),
+    );
+  });
+
+  it("never sends a currency: the ERP API takes it from the sales area", () => {
+    assert.equal("currency" in toSimulationRequest(mueller(), ORDER_DATE), false);
   });
 });
 

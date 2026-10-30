@@ -4,6 +4,7 @@ import {
   RESTRICTION_TEXTS,
 } from "@/lib/condition-type-display";
 import type { ConditionType } from "@/lib/condition-types";
+import { SCOPE_LABELS, scopesOf } from "@/lib/price-condition-form";
 import { CheckIcon } from "../icons";
 import { StatusBadge } from "../list-page";
 
@@ -49,6 +50,7 @@ export function ConditionTypesOverview({
                 <th scope="col" className="px-3 py-2.5 font-medium sm:px-4">Description</th>
                 <th scope="col" className="hidden px-3 py-2.5 font-medium sm:px-4 md:table-cell">Condition class</th>
                 <th scope="col" className="hidden px-3 py-2.5 font-medium sm:px-4 md:table-cell">Calculation type</th>
+                <th scope="col" className="hidden px-3 py-2.5 font-medium sm:px-4 lg:table-cell">Levels</th>
                 <th scope="col" className="hidden px-3 py-2.5 font-medium sm:table-cell sm:px-4">Status</th>
                 <th scope="col" className="px-3 py-2.5 font-medium sm:px-4">Usable for condition records</th>
               </tr>
@@ -69,6 +71,10 @@ export function ConditionTypesOverview({
                   </td>
                   <td className="hidden px-3 py-3 text-sm sm:px-4 md:table-cell">
                     {CALCULATION_TYPE_LABELS[type.calculationType]}
+                  </td>
+                  <td className="hidden px-3 py-3 text-sm sm:px-4 lg:table-cell" data-levels={type.code}>
+                    {/* Configured in the ERP API, e.g. ZP01 only per sales area */}
+                    {scopesOf(type).map((scope) => SCOPE_LABELS[scope]).join(", ") || "—"}
                   </td>
                   <td className="hidden px-3 py-3 sm:table-cell sm:px-4">
                     <StatusBadge isActive={type.isActive} />

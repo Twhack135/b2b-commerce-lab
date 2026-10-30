@@ -7,7 +7,6 @@ import {
   splitValidationMessages,
 } from "@/lib/form-errors";
 import {
-  parsePrice,
   validateMaterialForm,
   type FieldErrors,
   type MaterialFormField,
@@ -22,12 +21,7 @@ import {
 } from "../forms/form-controls";
 import { SidePanel } from "../forms/side-panel";
 
-const FIELDS: MaterialFormField[] = [
-  "materialNumber",
-  "description",
-  "price",
-  "currency",
-];
+const FIELDS: MaterialFormField[] = ["materialNumber", "description"];
 
 /**
  * Side panel for creating a material (no `material` given)
@@ -47,8 +41,6 @@ export function MaterialForm({
   const [values, setValues] = useState<MaterialFormValues>({
     materialNumber: material?.materialNumber ?? "",
     description: material?.description ?? "",
-    price: material ? material.price.toFixed(2) : "",
-    currency: material?.currency ?? "EUR",
   });
   // Fields the user has left at least once; errors show only for those
   const [touched, setTouched] = useState<Set<MaterialFormField>>(new Set());
@@ -88,11 +80,8 @@ export function MaterialForm({
     submittingRef.current = true;
     setIsSubmitting(true);
 
-    const changes = {
-      description: values.description.trim(),
-      price: parsePrice(values.price),
-      currency: values.currency,
-    };
+    // Only master data; the deprecated price and currency are never sent
+    const changes = { description: values.description.trim() };
 
     try {
       const saved = material
@@ -200,44 +189,12 @@ export function MaterialForm({
             />
           </Field>
 
-          <div className="grid grid-cols-[1fr_7rem] gap-4">
-            <Field
-              id="price"
-              label="Price"
-              error={visibleError("price")}
-              hint="Up to two decimal places."
-            >
-              <input
-                id="price"
-                inputMode="decimal"
-                value={values.price}
-                onChange={(event) => change("price", event.target.value)}
-                onBlur={() => touch("price")}
-                placeholder="0.00"
-                autoComplete="off"
-                className={`${inputClass(visibleError("price"))} text-right tabular-nums`}
-              />
-            </Field>
-
-            <Field
-              id="currency"
-              label="Currency"
-              error={visibleError("currency")}
-            >
-              <input
-                id="currency"
-                value={values.currency}
-                // Currency codes are always uppercase, e.g. EUR
-                onChange={(event) =>
-                  change("currency", event.target.value.toUpperCase())
-                }
-                onBlur={() => touch("currency")}
-                maxLength={3}
-                autoComplete="off"
-                className={`${inputClass(visibleError("currency"))} uppercase`}
-              />
-            </Field>
-          </div>
+          <p
+            data-pricing-hint
+            className="rounded-md border border-line bg-canvas px-3 py-2 text-xs text-ink-muted"
+          >
+            Prices are maintained per sales area in Pricing.
+          </p>
         </div>
 
         <FormActions

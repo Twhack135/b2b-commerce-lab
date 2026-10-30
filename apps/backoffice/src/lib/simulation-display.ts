@@ -47,6 +47,7 @@ export function sortMessages(messages: SimulationMessage[]) {
 }
 
 export const CHECK_LABELS: Record<string, string> = {
+  SALES_AREA: "Sales area",
   PARTNERS: "Partners",
   MATERIALS: "Materials",
   PRICING: "Pricing",
@@ -90,9 +91,15 @@ const PARTNER_ROLES: PartnerRole[] = [
 export function headerFieldMessages(result: SalesOrderSimulation) {
   const byField: Partial<Record<HeaderField | "requestedShippingMethod", SimulationMessage[]>> = {};
   for (const message of result.messages) {
+    // Sales area messages of the ERP API name the sales organization
     const field =
-      message.field === "shipTo" ? "shipToCustomerNumber" : message.field;
+      message.field === "shipTo"
+        ? "shipToCustomerNumber"
+        : message.field === "salesOrganization"
+          ? "salesArea"
+          : message.field;
     if (
+      field === "salesArea" ||
       field === "unitId" ||
       field === "shipToCustomerNumber" ||
       field === "customerNote" ||
@@ -132,6 +139,7 @@ export function allMessages(result: SalesOrderSimulation) {
 }
 
 const HEADER_FIELDS: HeaderField[] = [
+  "salesArea",
   "unitId",
   "shipToCustomerNumber",
   "requestedDeliveryDate",
@@ -157,6 +165,11 @@ export function badRequestErrors(messages: string[]) {
       const errors = items.get(index) ?? {};
       errors[field] ??= sentence(`${field} ${itemMatch[3]}`);
       items.set(index, errors);
+      continue;
+    }
+    // The three fields of the sales area are one input in the form
+    if (/^(salesOrganization|distributionChannel|division) /.test(message)) {
+      header.salesArea ??= sentence(message);
       continue;
     }
     const field = fieldOfMessage(message, HEADER_FIELDS);

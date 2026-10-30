@@ -10,6 +10,8 @@ import {
   conflictingConditionId,
   emptyConditionForm,
   filterConditions,
+  scopesOf,
+  soldToOptions,
   toCreateInput,
   toUpdateInput,
   unitOptions,
@@ -19,6 +21,7 @@ import {
   type PriceConditionFormValues,
 } from "./price-condition-form.ts";
 import type { PriceCondition } from "./price-conditions.ts";
+import type { SalesArea } from "./sales-areas.ts";
 
 const p = (customerNumber: string, isActive = true) => ({
   customerNumber,
@@ -26,14 +29,47 @@ const p = (customerNumber: string, isActive = true) => ({
   isActive,
 });
 
+const DE = { salesOrganization: "1000", distributionChannel: "10", division: "00" };
+const PL = { ...DE, salesOrganization: "2000" };
+const JP = { ...DE, salesOrganization: "3000" };
+
+const area = (key: typeof DE, currency: string, currencyDecimals: number, isActive = true): SalesArea => ({
+  ...key,
+  salesOrganizationName: `Org ${key.salesOrganization}`,
+  distributionChannelName: "Direct Sales",
+  divisionName: "Cross-Division",
+  country: "DE",
+  currency,
+  currencyDecimals,
+  isActive,
+});
+/** As configured: Germany EUR, Japan JPY (no decimals); Poland inactive for the tests */
+const salesAreas = [area(DE, "EUR", 2), area(PL, "PLN", 2, false), area(JP, "JPY", 0)];
+
+// Materials have no price of their own
 const materials: Material[] = [
-  { materialNumber: "MAT-001", description: "Heat Pump", price: 4500, currency: "EUR" },
-  { materialNumber: "MAT-CH", description: "Valve", price: 20, currency: "CHF" },
+  { materialNumber: "MAT-001", description: "Heat Pump" },
+  { materialNumber: "MAT-002", description: "Thermostat" },
 ];
 
+const customer = (
+  number: string,
+  isActive: boolean,
+  salesAreasOfCustomer: { key: typeof DE; isActive: boolean }[],
+): Customer => ({
+  ...p(number, isActive),
+  street: "s",
+  postalCode: "1",
+  city: "c",
+  country: "DE",
+  salesAreas: salesAreasOfCustomer.map((a) => ({ ...a.key, isActive: a.isActive })),
+});
+// NOAREA is not assigned to Germany, PAUSED is inactive there
 const customers: Customer[] = [
-  { ...p("CUST-1000"), street: "s", postalCode: "1", city: "c", country: "DE", salesAreas: [] },
-  { ...p("OLD", false), street: "s", postalCode: "1", city: "c", country: "DE", salesAreas: [] },
+  customer("CUST-1000", true, [{ key: DE, isActive: true }, { key: JP, isActive: true }]),
+  customer("OLD", false, [{ key: DE, isActive: true }]),
+  customer("NOAREA", true, []),
+  customer("PAUSED", true, [{ key: DE, isActive: false }]),
 ];
 
 const unit = (unitId: string, isActive = true, soldTo = p("CUST-1000")): B2bUnit => ({
@@ -49,13 +85,19 @@ const unit = (unitId: string, isActive = true, soldTo = p("CUST-1000")): B2bUnit
   defaultShipToCustomerNumber: "CUST-1000",
 });
 
-const units = [unit("UNIT-S"), unit("UNIT-OFF", false), unit("UNIT-OLD", true, p("OLD", false))];
+const units = [
+  unit("UNIT-S"),
+  unit("UNIT-OFF", false),
+  unit("UNIT-OLD", true, p("OLD", false)),
+  { ...unit("UNIT-JP"), salesArea: JP },
+];
 
-/** As configured by the migration: only ZP02 and ZP03 are usable */
+/** As configured: ZP01 per sales area, ZP02 and ZP03 per Sold-to or unit */
 const conditionType = (
   code: string,
   name: string,
   restriction: ConditionType["restriction"],
+  allowedScopes: ConditionType["allowedScopes"] = [],
 ): ConditionType => ({
   code,
   name,
@@ -66,18 +108,20 @@ const conditionType = (
   allowedForConditionRecords: restriction === null,
   usableForPriceConditions: restriction === null,
   restriction,
+  allowedScopes,
 });
 const conditionTypes = [
-  conditionType("ZP01", "List Price", "NOT_ALLOWED_FOR_CONDITION_RECORDS"),
-  conditionType("ZP02", "Customer Net Price", null),
-  conditionType("ZP03", "Special Price", null),
+  conditionType("ZP01", "List Price", null, ["SALES_AREA"]),
+  conditionType("ZP02", "Customer Net Price", null, ["B2B_UNIT", "SOLD_TO"]),
+  conditionType("ZP03", "Special Price", null, ["B2B_UNIT", "SOLD_TO"]),
   conditionType("ZD01", "Customer Discount", "CALCULATION_NOT_SUPPORTED"),
 ];
 const ZP02 = { code: "ZP02", name: "Customer Net Price", conditionClass: "PRICE", calculationType: "QUANTITY" } as const;
 
-const context = { mode: "create" as const, materials, customers, units, conditionTypes };
+const context = { mode: "create" as const, salesAreas, materials, customers, units, conditionTypes };
 
 const soldToValues: PriceConditionFormValues = {
+  salesArea: "1000/10/00",
   conditionTypeCode: "ZP02",
   materialNumber: "MAT-001",
   scope: "SOLD_TO",
@@ -100,6 +144,7 @@ const unitValues: PriceConditionFormValues = {
 const condition = (changes: Partial<PriceCondition> = {}): PriceCondition => ({
   conditionId: 7,
   conditionType: ZP02,
+  salesArea: DE,
   materialNumber: "MAT-001",
   materialDescription: "Heat Pump",
   scope: "B2B_UNIT",
@@ -119,6 +164,8 @@ const errorsOf = (values: PriceConditionFormValues) =>
 describe("new condition values", () => {
   it("start today, open-ended and active", () => {
     assert.deepEqual(emptyConditionForm("2026-10-29"), {
+      // Germany unless the user chooses another sales area
+      salesArea: "1000/10/00",
       conditionTypeCode: "",
       materialNumber: "",
       scope: "",
@@ -151,7 +198,7 @@ describe("validatePriceConditionForm", () => {
     assert.deepEqual(errorsOf({ ...emptyConditionForm(""), validFrom: "" }), {
       conditionTypeCode: "Select a condition type.",
       materialNumber: "Select a material.",
-      scope: "Select whether the price is for a B2B unit or a Sold-to.",
+      scope: "Select the level of the price.",
       amount: "Amount is required.",
       validFrom: "Valid from is required.",
     });
@@ -226,32 +273,57 @@ describe("validatePriceConditionForm", () => {
 });
 
 describe("API input", () => {
-  it("sends only the key of the scope and the currency of the material", () => {
-    assert.deepEqual(toCreateInput(soldToValues, materials), {
+  it("sends the sales area and only the key of the scope, never a currency", () => {
+    assert.deepEqual(toCreateInput(soldToValues, 2), {
+      ...DE,
       conditionTypeCode: "ZP02",
       materialNumber: "MAT-001",
       scope: "SOLD_TO",
       soldToCustomerNumber: "CUST-1000",
       amount: "4350.50",
-      currency: "EUR",
       validFrom: "2026-01-01",
       validTo: null,
       isActive: true,
     });
     assert.deepEqual(
-      toCreateInput({ ...unitValues, materialNumber: "MAT-CH", validTo: "2026-06-30" }, materials),
+      toCreateInput({ ...unitValues, materialNumber: "MAT-002", validTo: "2026-06-30" }, 2),
       {
+        ...DE,
         conditionTypeCode: "ZP02",
-        materialNumber: "MAT-CH",
+        materialNumber: "MAT-002",
         scope: "B2B_UNIT",
         unitId: "UNIT-S",
         amount: "4350.50",
-        currency: "CHF",
         validFrom: "2026-01-01",
         validTo: "2026-06-30",
         isActive: true,
       },
     );
+  });
+
+  it("sends a list price without Sold-to and unit", () => {
+    assert.deepEqual(
+      toCreateInput(
+        { ...soldToValues, conditionTypeCode: "ZP01", scope: "SALES_AREA", soldToCustomerNumber: "", amount: "4500" },
+        2,
+      ),
+      {
+        ...DE,
+        conditionTypeCode: "ZP01",
+        materialNumber: "MAT-001",
+        scope: "SALES_AREA",
+        amount: "4500.00",
+        validFrom: "2026-01-01",
+        validTo: null,
+        isActive: true,
+      },
+    );
+  });
+
+  it("sends JPY amounts without decimal places", () => {
+    const values = { ...soldToValues, salesArea: "3000/10/00", amount: "0700000" };
+    assert.equal(toCreateInput(values, 0).amount, "700000");
+    assert.equal(toCreateInput(values, 0).salesOrganization, "3000");
   });
 
   it("sends the changeable fields when editing; empty end means open-ended", () => {
@@ -299,7 +371,7 @@ describe("display helpers", () => {
 
   it("marks units that cannot get a new price", () => {
     assert.deepEqual(
-      unitOptions(units).map((u) => [u.unitId, u.isSelectable, u.note]),
+      unitOptions(units, "1000/10/00").map((u) => [u.unitId, u.isSelectable, u.note]),
       [
         ["UNIT-S", true, undefined],
         ["UNIT-OFF", false, "inactive"],
@@ -309,13 +381,90 @@ describe("display helpers", () => {
   });
 });
 
+describe("sales areas and markets", () => {
+  it("offers only the units of the sales area", () => {
+    assert.deepEqual(unitOptions(units, "3000/10/00").map((u) => u.unitId), ["UNIT-JP"]);
+    assert.deepEqual(unitOptions(units, "2000/10/00"), []);
+  });
+
+  it("offers only customers active in the sales area as Sold-to", () => {
+    assert.deepEqual(
+      soldToOptions(customers, "1000/10/00").map((c) => [c.customerNumber, c.isSelectable, c.note ?? null]),
+      [
+        ["CUST-1000", true, null],
+        ["OLD", false, "inactive"],
+        ["NOAREA", false, "not assigned to the sales area"],
+        ["PAUSED", false, "inactive in the sales area"],
+      ],
+    );
+    assert.deepEqual(
+      soldToOptions(customers, "3000/10/00").filter((c) => c.isSelectable).map((c) => c.customerNumber),
+      ["CUST-1000"],
+    );
+  });
+
+  it("requires an active sales area", () => {
+    assert.equal(errorsOf({ ...soldToValues, salesArea: "" }).salesArea, "Select a sales area.");
+    assert.equal(
+      errorsOf({ ...soldToValues, salesArea: "2000/10/00" }).salesArea,
+      "This sales area is inactive and cannot get new prices.",
+    );
+  });
+
+  it("rejects customers and units of another market", () => {
+    assert.equal(
+      errorsOf({ ...soldToValues, soldToCustomerNumber: "NOAREA" }).soldToCustomerNumber,
+      "Customer NOAREA is not assigned to sales area 1000/10/00.",
+    );
+    assert.equal(
+      errorsOf({ ...soldToValues, soldToCustomerNumber: "PAUSED" }).soldToCustomerNumber,
+      "Customer PAUSED is inactive in sales area 1000/10/00.",
+    );
+    assert.equal(
+      errorsOf({ ...unitValues, unitId: "UNIT-JP" }).unitId,
+      "B2B unit UNIT-JP belongs to sales area 3000/10/00, not 1000/10/00.",
+    );
+    assert.deepEqual(errorsOf({ ...unitValues, salesArea: "3000/10/00", unitId: "UNIT-JP", amount: "700000" }), {});
+  });
+
+  it("uses the configured scopes of the condition type", () => {
+    assert.deepEqual(scopesOf(conditionTypes[0]), ["SALES_AREA"]);
+    assert.deepEqual(scopesOf(conditionTypes[1]), ["B2B_UNIT", "SOLD_TO"]);
+    assert.deepEqual(scopesOf(undefined), []);
+    const listPrice = { ...soldToValues, conditionTypeCode: "ZP01", scope: "SALES_AREA" as const, soldToCustomerNumber: "" };
+    assert.deepEqual(errorsOf(listPrice), {});
+    assert.equal(
+      errorsOf({ ...soldToValues, conditionTypeCode: "ZP01" }).scope,
+      "Condition type ZP01 cannot be used for the level Sold-to.",
+    );
+    assert.equal(
+      errorsOf({ ...listPrice, conditionTypeCode: "ZP02" }).scope,
+      "Condition type ZP02 cannot be used for the level Sales area.",
+    );
+  });
+
+  it("checks the amount with the decimal places of the currency", () => {
+    const japan = { ...unitValues, salesArea: "3000/10/00", unitId: "UNIT-JP" };
+    assert.equal(
+      errorsOf({ ...japan, amount: "700000.50" }).amount,
+      "Enter a whole amount: this currency has no decimal places.",
+    );
+    assert.equal(errorsOf({ ...japan, amount: "700000" }).amount, undefined);
+    assert.equal(errorsOf({ ...soldToValues, amount: "4400.50" }).amount, undefined);
+  });
+
+  it("loads the sales area of a stored condition", () => {
+    assert.equal(conditionToForm(condition({ salesArea: JP })).salesArea, "3000/10/00");
+  });
+});
+
 describe("filterConditions", () => {
   const all = [
     condition({ conditionId: 1 }),
     condition({ conditionId: 2, scope: "SOLD_TO", unit: null, soldTo: p("CUST-1000") }),
     condition({ conditionId: 3, materialNumber: "MAT-002", materialDescription: "Thermostat", isActive: false }),
   ];
-  const none: ConditionFilter = { materialNumber: "", scope: "", status: "all", search: "" };
+  const none: ConditionFilter = { salesArea: "", materialNumber: "", scope: "", status: "all", search: "" };
   const ids = (filter: Partial<ConditionFilter>) =>
     filterConditions(all, { ...none, ...filter }).map((c) => c.conditionId);
 
@@ -328,6 +477,39 @@ describe("filterConditions", () => {
     assert.deepEqual(ids({ search: "thermo" }), [3]);
     assert.deepEqual(ids({ search: "unit-s" }), [1, 3]);
     assert.deepEqual(ids({ scope: "B2B_UNIT", status: "active" }), [1]);
+  });
+
+  // A list price has neither a Sold-to nor a unit
+  const listPrice = condition({
+    conditionId: 4,
+    conditionType: { ...ZP02, code: "ZP01", name: "List Price" },
+    scope: "SALES_AREA",
+    soldTo: null,
+    unit: null,
+  });
+  const japan = condition({ conditionId: 5, salesArea: JP, amount: "700000", currency: "JPY" });
+
+  it("handles list prices without Sold-to and unit", () => {
+    const filtered = filterConditions([...all, listPrice], { ...none, search: "list" });
+    assert.deepEqual(filtered.map((c) => c.conditionId), [4]);
+    assert.deepEqual(conditionWarnings(listPrice), []);
+    assert.deepEqual(
+      filterConditions([...all, listPrice], { ...none, scope: "SALES_AREA" }).map((c) => c.conditionId),
+      [4],
+    );
+  });
+
+  it("filters and searches by sales area", () => {
+    const both = [...all, japan];
+    assert.deepEqual(
+      filterConditions(both, { ...none, salesArea: "3000/10/00" }).map((c) => c.conditionId),
+      [5],
+    );
+    assert.deepEqual(
+      filterConditions(both, { ...none, salesArea: "1000/10/00" }).map((c) => c.conditionId),
+      [1, 2, 3],
+    );
+    assert.deepEqual(filterConditions(both, { ...none, search: "3000/" }).map((c) => c.conditionId), [5]);
   });
 });
 
@@ -348,8 +530,8 @@ describe("condition types in the form", () => {
     }
   });
 
-  it("rejects types the ERP API reports as not usable, e.g. ZP01 and ZD01", () => {
-    for (const conditionTypeCode of ["ZP01", "ZD01"]) {
+  it("rejects types the ERP API reports as not usable, e.g. ZD01", () => {
+    for (const conditionTypeCode of ["ZD01"]) {
       assert.equal(
         validatePriceConditionForm({ ...soldToValues, conditionTypeCode }, context).conditionTypeCode,
         `Condition type ${conditionTypeCode} cannot be used for new price conditions.`,

@@ -90,3 +90,13 @@ export function formatAmount(
     ? `${sign}${grouped}`
     : `${sign}${grouped}.${fraction}`;
 }
+
+/**
+ * Formats an amount as sent by the ERP API. The decimal places come from
+ * the currency configuration (e.g. 0 for JPY); while it is not loaded, the
+ * amount is shown with the decimal places the ERP API sent.
+ */
+export function formatApiAmount(amount: string, decimals?: number): string {
+  const sent = /\.(\d+)$/.exec(amount)?.[1].length ?? 0;
+  return formatAmount(amount, decimals ?? sent);
+}
