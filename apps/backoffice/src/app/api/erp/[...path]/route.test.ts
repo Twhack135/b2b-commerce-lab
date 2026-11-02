@@ -268,6 +268,59 @@ describe("allowed routes are forwarded", () => {
     assert.deepEqual(JSON.parse(String(init.body)), simulation);
   });
 
+  // Sprint 10C endpoints: creating and reading sales orders
+  it("POST /sales-orders with the exact request body and answer", async () => {
+    const request = {
+      requestId: "8f0c6a1e-3b7d-4e7a-9c55-1f2a3b4c5d6e",
+      salesOrganization: "1000",
+      distributionChannel: "10",
+      division: "00",
+      unitId: "UNIT-STUTTGART",
+      items: [{ materialNumber: "MAT-001", quantity: 2, expectedUnitPrice: "4400.00" }],
+      expectedTotal: { netValue: "8800.00", currency: "EUR" },
+    };
+    const order = { salesOrderNumber: "1000000001", totals: { netValue: "8800.00" } };
+    const fetchMock = mockUpstream(upstreamJson(201, order));
+
+    const response = await call("POST", ["sales-orders"], request);
+
+    assert.equal(response.status, 201);
+    assert.deepEqual(await response.json(), order);
+    const { url, init } = upstreamCall(fetchMock);
+    assert.equal(url, "http://erp.test:3000/sales-orders");
+    assert.equal(init.method, "POST");
+    // The body is passed on as sent, prices stay exact strings
+    assert.equal(String(init.body), JSON.stringify(request));
+  });
+
+  it("passes 200 (repeated request) and the 409/422 business answers through", async () => {
+    for (const [status, body] of [
+      [200, { salesOrderNumber: "1000000001" }],
+      [409, { code: "PRICE_CHANGED", changedItems: [{ itemNumber: 10 }] }],
+      [409, { code: "IDEMPOTENCY_KEY_REUSED", salesOrderNumber: "1000000001" }],
+      [409, { code: "CONCURRENT_UPDATE" }],
+      [422, { code: "ORDER_INVALID", evaluation: { status: "INVALID" } }],
+    ] as const) {
+      mock.restoreAll();
+      mockUpstream(upstreamJson(status, body));
+      const response = await call("POST", ["sales-orders"], {});
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), body);
+    }
+  });
+
+  it("GET /sales-orders/:salesOrderNumber for a 10-digit number", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, { salesOrderNumber: "1000000001" }));
+
+    const response = await call("GET", ["sales-orders", "1000000001"]);
+
+    assert.equal(response.status, 200);
+    const { url, init } = upstreamCall(fetchMock);
+    assert.equal(url, "http://erp.test:3000/sales-orders/1000000001");
+    assert.equal(init.method, "GET");
+    assert.equal(init.body, undefined);
+  });
+
   it("encodes the account number inside the members path", async () => {
     const fetchMock = mockUpstream(upstreamJson(200, {}));
 
@@ -322,7 +375,6 @@ describe("upstream URL is server-configured", () => {
 describe("blocked routes are never forwarded", () => {
   for (const [method, path] of [
     ["GET", ["pricing"]],
-    ["GET", ["sales-orders"]],
     ["GET", ["materials", "MAT-001", "history"]],
     ["GET", ["customers", "CUST-0001", "partners"]],
     ["GET", ["customers", ".."]],
@@ -352,12 +404,19 @@ describe("blocked routes are never forwarded", () => {
     ["GET", ["condition-types", "ZP02"]],
     ["PATCH", ["condition-types", "ZP02"]],
     ["GET", ["condition-type"]],
-    // Sprint 8A resources: only the simulation exists, no sales orders yet
-    ["GET", ["sales-orders"]],
-    ["POST", ["sales-orders"]],
+    // Sales orders: only simulation, creation and reading one order by its
+    // 10-digit number (Sprint 10C); no list, changes or status actions yet
     ["GET", ["sales-orders", "4711"]],
+    ["GET", ["sales-orders", "100000000"]],
+    ["GET", ["sales-orders", "10000000011"]],
+    ["GET", ["sales-orders", "100000000a"]],
+    ["GET", ["sales-orders", "%31000000001"]],
     ["POST", ["sales-orders", "simulate", "x"]],
     ["POST", ["sales-orders", "place"]],
+    ["POST", ["sales-orders", "1000000001", "delivery-block", "release"]],
+    ["POST", ["sales-orders", "1000000001", "release-delivery-block"]],
+    ["GET", ["sales-orders", "1000000001", "confirmation"]],
+    ["PATCH", ["sales-orders", "1000000001", "status"]],
     // Sprint 9C-A resources: only the exact implemented paths
     ["GET", ["currencies", "EUR"]],
     ["GET", ["sales-areas", "1000"]],
@@ -430,6 +489,15 @@ describe("blocked methods are never forwarded", () => {
     ["PUT", ["sales-orders", "simulate"], "POST"],
     ["PATCH", ["sales-orders", "simulate"], "POST"],
     ["DELETE", ["sales-orders", "simulate"], "POST"],
+    // Sprint 10C: orders are created, read one by one, never changed or deleted
+    ["GET", ["sales-orders"], "POST"],
+    ["PUT", ["sales-orders"], "POST"],
+    ["PATCH", ["sales-orders"], "POST"],
+    ["DELETE", ["sales-orders"], "POST"],
+    ["DELETE", ["sales-orders", "1000000001"], "GET"],
+    ["PATCH", ["sales-orders", "1000000001"], "GET"],
+    ["PUT", ["sales-orders", "1000000001"], "GET"],
+    ["POST", ["sales-orders", "1000000001"], "GET"],
     // Sprint 9C-A: configuration is read-only, assignments are never deleted
     ["POST", ["currencies"], "GET"],
     ["PATCH", ["sales-areas"], "GET"],
@@ -499,6 +567,32 @@ describe("upstream responses", () => {
 
     assert.equal(response.status, 502);
     assert.match((await response.json()).message, /not reachable/);
+  });
+
+  it("returns 504 when the ERP API does not answer in time (result unknown)", async () => {
+    mock.method(globalThis, "fetch", async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    });
+
+    const response = await call("POST", ["sales-orders"], {});
+
+    assert.equal(response.status, 504);
+    assert.match((await response.json()).message, /may still have been processed/);
+  });
+
+  it("waits longer for creating a sales order than for other requests", async () => {
+    const timeouts: number[] = [];
+    mock.method(AbortSignal, "timeout", (ms: number) => {
+      timeouts.push(ms);
+      return new AbortController().signal;
+    });
+    mockUpstream(upstreamJson(200, {}));
+
+    await call("POST", ["sales-orders"], {});
+    await call("POST", ["sales-orders", "simulate"], {});
+    await call("GET", ["sales-orders", "1000000001"]);
+
+    assert.deepEqual(timeouts, [30_000, 10_000, 10_000]);
   });
 
   it("returns 502 when no server listens on the ERP API port", async () => {

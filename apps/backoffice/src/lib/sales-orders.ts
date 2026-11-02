@@ -1,6 +1,6 @@
 import type { PartnerSummary } from "./b2b-units";
 import type { ConditionTypeSummary } from "./condition-types";
-import { erpFetch } from "./erp-api";
+import { erpFetch, erpRequest } from "./erp-api";
 import type { PricingSource, PricingStep } from "./pricing";
 import type { SalesAreaKey } from "./sales-areas";
 
@@ -111,4 +111,107 @@ export function simulateSalesOrder(request: SimulationRequest) {
     method: "POST",
     body: request,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Sales orders (Sprint 10B API): POST /sales-orders, GET /sales-orders/:number
+// ---------------------------------------------------------------------------
+
+/**
+ * A creation request. The prices are only the prices the user confirmed (from
+ * the simulation); the ERP API determines the prices itself and answers 409
+ * PRICE_CHANGED if any of them differs. There is no pricing date: the ERP API
+ * sets the order date in the time zone of the sales organization.
+ */
+export type CreateSalesOrderRequest = SalesAreaKey & {
+  /** One UUID per confirmed creation attempt; a retry sends the same one */
+  requestId: string;
+  unitId: string;
+  shipToCustomerNumber: string | null;
+  requestedDeliveryDate: string | null;
+  requestedShippingMethod: RequestedShippingMethod;
+  customerReference: string | null;
+  customerNote: string | null;
+  items: { materialNumber: string; quantity: number; expectedUnitPrice: string }[];
+  expectedTotal: { netValue: string; currency: string };
+};
+
+export type SalesOrderPartner = {
+  customerNumber: string;
+  name: string;
+  street: string;
+  postalCode: string;
+  city: string;
+  country: string;
+};
+
+export type SalesOrderItemCondition = {
+  stepNumber: number;
+  conditionType: { code: string; name: string };
+  source: PricingSource;
+  conditionId: number;
+  amount: string;
+  validFrom: string;
+  validTo: string | null;
+  value: string;
+};
+
+/** A stored sales order: snapshots, never current master data */
+export type SalesOrder = {
+  salesOrderNumber: string;
+  requestId: string;
+  status: "OPEN";
+  deliveryBlock: "SALES_REVIEW" | null;
+  salesArea: SalesAreaKey;
+  currency: string;
+  currencyDecimals: number;
+  /** Order date = pricing date, in the time zone of the sales organization */
+  orderDate: string;
+  timeZone: string;
+  requestedDeliveryDate: string | null;
+  requestedShippingMethod: RequestedShippingMethod;
+  customerReference: string | null;
+  customerNote: string | null;
+  unit: { unitId: string; name: string };
+  partners: {
+    soldTo: SalesOrderPartner;
+    shipTo: SalesOrderPartner;
+    billTo: SalesOrderPartner;
+    payer: SalesOrderPartner;
+  };
+  items: {
+    itemNumber: number;
+    materialNumber: string;
+    materialDescription: string;
+    quantity: number;
+    unitPrice: string;
+    netValue: string;
+    conditions: SalesOrderItemCondition[];
+  }[];
+  totals: { netValue: string; currency: string; includes: "NET_EXCL_TAX_AND_FREIGHT" };
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Longer than the proxy timeout for order creation (30 s), which is longer
+ * than the ERP API transaction (25 s), so the browser hears the real answer
+ */
+export const CREATE_TIMEOUT_MS = 35_000;
+
+/**
+ * 201: created; 200: this request was already processed and the existing
+ * order is returned (`created` false). Every other answer is an ApiError.
+ */
+export async function createSalesOrder(request: CreateSalesOrderRequest) {
+  const { status, data } = await erpRequest<SalesOrder>("/sales-orders", {
+    method: "POST",
+    body: request,
+    timeoutMs: CREATE_TIMEOUT_MS,
+  });
+  return { order: data, created: status === 201 };
+}
+
+export function getSalesOrder(salesOrderNumber: string) {
+  return erpFetch<SalesOrder>(`/sales-orders/${encodeURIComponent(salesOrderNumber)}`);
 }

@@ -11,9 +11,18 @@ const TIMEOUT_MS = 10_000;
 
 type Method = "GET" | "POST" | "PATCH" | "PUT";
 
+type Route = {
+  method: Method;
+  path: string[];
+  /** Patterns a ":param" segment must match, e.g. a sales order number */
+  params?: Record<string, RegExp>;
+  /** Overrides TIMEOUT_MS for a slow endpoint */
+  timeoutMs?: number;
+};
+
 // ":param" matches exactly one path segment, e.g. a material number.
 // Add a line here when a new ERP endpoint should be reachable.
-const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
+const ALLOWED_ROUTES: Route[] = [
   { method: "GET", path: ["materials"] },
   { method: "GET", path: ["materials", ":materialNumber"] },
   { method: "POST", path: ["materials"] },
@@ -61,6 +70,16 @@ const ALLOWED_ROUTES: { method: Method; path: string[] }[] = [
   { method: "POST", path: ["pricing", "price"] },
   // Read-only order simulation; nothing is stored
   { method: "POST", path: ["sales-orders", "simulate"] },
+  // Creates a sales order. The ERP API transaction may wait up to 25 s for
+  // locks, so the proxy waits longer than for other requests.
+  { method: "POST", path: ["sales-orders"], timeoutMs: 30_000 },
+  // A stored sales order; only 10-digit numbers, so e.g. "simulate" never
+  // matches this route
+  {
+    method: "GET",
+    path: ["sales-orders", ":salesOrderNumber"],
+    params: { salesOrderNumber: /^\d{10}$/ },
+  },
 ];
 
 /** Read at request time; never taken from the incoming request */
@@ -68,12 +87,13 @@ function erpApiUrl() {
   return (process.env.ERP_API_URL || DEFAULT_ERP_API_URL).replace(/\/+$/, "");
 }
 
-function matchesPath(pattern: string[], segments: string[]) {
+function matchesPath(route: Route, segments: string[]) {
   return (
-    pattern.length === segments.length &&
-    pattern.every((part, index) =>
+    route.path.length === segments.length &&
+    route.path.every((part, index) =>
       part.startsWith(":")
-        ? isValidParam(segments[index])
+        ? isValidParam(segments[index]) &&
+          (route.params?.[part.slice(1)]?.test(segments[index]) ?? true)
         : part === segments[index],
     )
   );
@@ -90,7 +110,7 @@ async function proxy(
   const { path } = await ctx.params;
 
   const routesForPath = ALLOWED_ROUTES.filter((route) =>
-    matchesPath(route.path, path),
+    matchesPath(route, path),
   );
   if (routesForPath.length === 0) {
     return errorResponse(404, "Unknown ERP resource.");
@@ -117,9 +137,16 @@ async function proxy(
       body: hasBody ? await request.text() : undefined,
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(route.timeoutMs ?? TIMEOUT_MS),
     });
-  } catch {
+  } catch (error) {
+    // The request reached the ERP API and may still be processed there
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return errorResponse(
+        504,
+        "The ERP API did not answer in time. The request may still have been processed.",
+      );
+    }
     return errorResponse(
       502,
       "The ERP API is not reachable. Please check that it is running.",

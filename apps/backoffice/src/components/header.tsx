@@ -2,7 +2,7 @@ import { MenuIcon } from "./icons";
 
 export function Header({ onOpenNav }: { onOpenNav: () => void }) {
   return (
-    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6 lg:px-8 print:hidden">
       <button
         type="button"
         onClick={onOpenNav}

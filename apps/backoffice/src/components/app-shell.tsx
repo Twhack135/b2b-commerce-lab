@@ -10,7 +10,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isNavOpen, setIsNavOpen] = useState(false);
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full print:block print:h-auto">
       <Sidebar isOpen={isNavOpen} onNavigate={() => setIsNavOpen(false)} />
 
       {isNavOpen && (
@@ -24,7 +24,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Header onOpenNav={() => setIsNavOpen(true)} />
-        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+        {/* Printed pages (order confirmation) flow over several sheets */}
+        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 print:overflow-visible print:p-0">
           {children}
         </main>
       </div>

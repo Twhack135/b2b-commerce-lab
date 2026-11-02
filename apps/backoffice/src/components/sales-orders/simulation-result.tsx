@@ -1,4 +1,5 @@
 import { formatApiAmount } from "@/lib/money";
+import type { ChangedItemPrice } from "@/lib/order-creation";
 import { SOURCE_LABELS } from "@/lib/price-check";
 import type {
   SalesOrderSimulation,
@@ -38,11 +39,14 @@ export function SimulationResult({
   result,
   isOutdated,
   decimals,
+  changedPrices,
 }: {
   result: SalesOrderSimulation;
   isOutdated: boolean;
   /** Decimal places of the document currency, e.g. 0 for JPY */
   decimals?: number;
+  /** Prices that differ from the prices the user confirmed, by item number */
+  changedPrices?: Map<number, ChangedItemPrice>;
 }) {
   const total = totalToShow(result);
   const { performed, notPerformed } = splitChecks(result.checks);
@@ -149,7 +153,7 @@ export function SimulationResult({
 
         {result.messages.length > 0 && <MessageList messages={result.messages} />}
 
-        <ItemTable result={result} decimals={decimals} />
+        <ItemTable result={result} decimals={decimals} changedPrices={changedPrices} />
 
         <div
           data-total
@@ -234,10 +238,14 @@ function MessageList({ messages }: { messages: SimulationMessage[] }) {
 function ItemTable({
   result,
   decimals,
+  changedPrices,
 }: {
   result: SalesOrderSimulation;
   decimals?: number;
+  changedPrices?: Map<number, ChangedItemPrice>;
 }) {
+  const money = (amount: string | null) =>
+    amount === null ? "no price" : `${formatApiAmount(amount, decimals)} ${result.currency}`;
   return (
     <div className="overflow-x-auto rounded-lg border border-line bg-surface">
       <table className="w-full text-left">
@@ -253,7 +261,12 @@ function ItemTable({
         </thead>
         <tbody className="divide-y divide-line">
           {result.items.map((item) => (
-            <tr key={item.itemNumber} data-result-item={item.itemNumber} className="align-top">
+            <tr
+              key={item.itemNumber}
+              data-result-item={item.itemNumber}
+              data-price-changed={changedPrices?.has(item.itemNumber) || undefined}
+              className={`align-top ${changedPrices?.has(item.itemNumber) ? "bg-warning-soft" : ""}`}
+            >
               <td className="px-3 py-3 font-mono text-sm tabular-nums sm:px-4">{item.itemNumber}</td>
               <td className="px-3 py-3 sm:px-4">
                 <div className="font-mono text-sm">{item.materialNumber}</div>
@@ -272,6 +285,13 @@ function ItemTable({
                       {" "}· {item.unitPrice && formatApiAmount(item.unitPrice, decimals)} {item.currency} each
                     </span>
                   </div>
+                )}
+                {changedPrices?.has(item.itemNumber) && (
+                  <p data-price-change className="mt-1 text-xs font-medium text-warning">
+                    Price changed: confirmed{" "}
+                    <span className="line-through">{money(changedPrices.get(item.itemNumber)!.expectedUnitPrice)}</span>,
+                    now {money(changedPrices.get(item.itemNumber)!.unitPrice)}
+                  </p>
                 )}
                 {item.messages.map((m) => (
                   <p key={m.code} className={`mt-1 text-xs ${SEVERITY_STYLES[m.severity]}`}>

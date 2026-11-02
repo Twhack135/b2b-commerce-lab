@@ -20,12 +20,25 @@ export class ApiError extends Error {
 type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT";
   body?: unknown;
+  /** Give up waiting after this time (the server may still finish the request) */
+  timeoutMs?: number;
 };
+
+/** Marks an ApiError of status 0 whose request ran out of time */
+export const TIMEOUT = "TIMEOUT";
 
 export async function erpFetch<T>(
   path: string,
-  { method = "GET", body }: RequestOptions = {},
+  options: RequestOptions = {},
 ): Promise<T> {
+  return (await erpRequest<T>(path, options)).data;
+}
+
+/** Like erpFetch, but also returns the HTTP status of a successful answer */
+export async function erpRequest<T>(
+  path: string,
+  { method = "GET", body, timeoutMs }: RequestOptions = {},
+): Promise<{ status: number; data: T }> {
   let response: Response;
   try {
     response = await fetch(`/api/erp${path}`, {
@@ -34,8 +47,16 @@ export async function erpFetch<T>(
         body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
+      signal: timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs),
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError(
+        0,
+        ["The ERP API did not answer in time. The request may still have been processed."],
+        { code: TIMEOUT },
+      );
+    }
     throw new ApiError(0, [
       "Network error. Please check your connection and try again.",
     ]);
@@ -46,7 +67,7 @@ export async function erpFetch<T>(
   if (!response.ok) {
     throw new ApiError(response.status, readMessages(response.status, data), data);
   }
-  return data as T;
+  return { status: response.status, data: data as T };
 }
 
 /** NestJS sends { message: string } or { message: string[] } on errors */

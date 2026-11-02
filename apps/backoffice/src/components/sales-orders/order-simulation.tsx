@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { listB2bUnits } from "@/lib/b2b-units";
 import { ApiError, errorMessage } from "@/lib/erp-api";
 import {
@@ -26,8 +27,24 @@ import {
   type OrderSimulationValues,
 } from "@/lib/order-simulation-form";
 import {
+  changedPricesByItem,
+  clearPendingRequest,
+  CONCURRENT_RETRY_DELAYS_MS,
+  creationBlocker,
+  creationOutcome,
+  parsePendingRequest,
+  readPendingText,
+  savePendingRequest,
+  toCreateRequest,
+  type ChangedItemPrice,
+  type CreationOutcome,
+} from "@/lib/order-creation";
+import {
+  createSalesOrder,
   simulateSalesOrder,
+  type CreateSalesOrderRequest,
   type SalesOrderSimulation,
+  type SimulationRequest,
 } from "@/lib/sales-orders";
 import {
   badRequestErrors,
@@ -41,18 +58,39 @@ import { useListData } from "@/lib/use-list-data";
 import { useToday } from "@/lib/use-today";
 import { FormErrorAlert } from "../forms/form-controls";
 import { LoadError, PageHeader } from "../list-page";
+import { CreateOrderPanel, type CreationState } from "./create-order-panel";
 import { OrderHeaderForm } from "./order-header-form";
 import { focusInput, OrderItemsEditor } from "./order-items-editor";
 import { SimulationResult } from "./simulation-result";
 
-type Simulated = { result: SalesOrderSimulation; inputKey: string };
+/** A simulation result with the exact request and input it belongs to */
+type Simulated = {
+  result: SalesOrderSimulation;
+  inputKey: string;
+  request: SimulationRequest;
+};
+
+const IDLE: CreationState = { phase: "idle" };
+
+/** The session storage, or undefined where it cannot be used */
+function sessionStore(): Storage | undefined {
+  try {
+    return typeof window === "undefined" ? undefined : window.sessionStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const noSubscription = () => () => {};
 
 /**
- * Read-only order simulation: enter an order for a B2B unit and let the ERP
- * API determine partners, prices and messages. Nothing is stored, and there
- * is deliberately no way to place the order here.
+ * Order simulation: enter an order for a B2B unit and let the ERP API
+ * determine partners, prices and messages. A simulation stores nothing; a
+ * valid simulation can then be confirmed as a permanent sales order.
  */
 export function OrderSimulation() {
+  const router = useRouter();
   const units = useListData(listB2bUnits);
   const materials = useListData(listMaterials);
   // The shop context: the first field of the order header
@@ -75,10 +113,48 @@ export function OrderSimulation() {
   const [itemNotice, setItemNotice] = useState<{ key: number; text: string } | null>(null);
   // An input to focus once it is rendered (the material of a new item)
   const [focusRequest, setFocusRequest] = useState<{ id: string } | null>(null);
+  // Creating a sales order from the simulation
+  const [creationState, setCreation] = useState<CreationState>(IDLE);
+  const creatingRef = useRef(false);
+  // Prices that changed since the user confirmed them (409 PRICE_CHANGED)
+  const [changedPrices, setChangedPrices] = useState<Map<number, ChangedItemPrice> | null>(null);
+
+  // A creation whose result is unknown survives a reload (session storage):
+  // it can only be repeated unchanged, never replaced by a new request
+  const pendingText = useSyncExternalStore(
+    noSubscription,
+    () => readPendingText(sessionStore()),
+    () => null,
+  );
+  const recovered = useMemo(() => parsePendingRequest(pendingText), [pendingText]);
+  const creation: CreationState =
+    creationState.phase === "idle" && recovered
+      ? {
+          phase: "answered",
+          request: recovered,
+          outcome: {
+            kind: "retry",
+            reason: "UNCERTAIN",
+            messages: [
+              "A sales order creation was started earlier and its result is not known.",
+            ],
+          },
+        }
+      : creationState;
 
   useEffect(() => {
     if (focusRequest) focusInput(focusRequest.id);
   }, [focusRequest]);
+
+  // An answer of the ERP API to a creation may be far below the visible part
+  // of the page: show it once it is rendered
+  useEffect(() => {
+    if (creationState.phase === "answered") {
+      document
+        .querySelector("[data-creation-outcome]")
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [creationState]);
 
   const form = values;
 
@@ -100,6 +176,12 @@ export function OrderSimulation() {
   );
   const isOutdated =
     simulated !== null && simulated.inputKey !== inputKey(form, pricingDate);
+  // While an order is being created, or its result is unknown, the input
+  // must not change: only the same request may be repeated
+  const isLocked =
+    creation.phase === "submitting" ||
+    (creation.phase === "answered" && creation.outcome.kind === "retry");
+  const blocker = creationBlocker(simulated, isOutdated);
   // Messages are only shown at the inputs while they belong to this input
   const current = simulated && !isOutdated ? simulated.result : null;
 
@@ -132,9 +214,13 @@ export function OrderSimulation() {
    * are never lost
    */
   function change(update: (current: OrderSimulationValues) => OrderSimulationValues) {
+    if (isLocked) return;
     setValues(update);
     setBadRequest(null);
     setItemNotice(null);
+    // An answer about the previous input no longer applies
+    setCreation(IDLE);
+    setChangedPrices(null);
   }
 
   /** Enter in a quantity: next item, or a new item after the last one */
@@ -154,7 +240,7 @@ export function OrderSimulation() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (simulatingRef.current) return;
+    if (simulatingRef.current || isLocked) return;
     setSubmitAttempted(true);
     setGeneralError(null);
     if (hasErrors(clientErrors)) {
@@ -166,9 +252,12 @@ export function OrderSimulation() {
     setIsSimulating(true);
     const key = inputKey(form, pricingDate);
     try {
-      const result = await simulateSalesOrder(toSimulationRequest(form, pricingDate));
-      setSimulated({ result, inputKey: key });
+      const request = toSimulationRequest(form, pricingDate);
+      const result = await simulateSalesOrder(request);
+      setSimulated({ result, inputKey: key, request });
       setBadRequest(null);
+      setCreation(IDLE);
+      setChangedPrices(null);
     } catch (error) {
       if (error instanceof ApiError && error.status === 400) {
         const mapped = badRequestErrors(error.messages);
@@ -189,7 +278,15 @@ export function OrderSimulation() {
   }
 
   function reset() {
+    if (isLocked) return;
+    clearOrder();
+    setCreation(IDLE);
+  }
+
+  /** An empty order: form, result and answers of the previous order are gone */
+  function clearOrder() {
     setValues(emptySimulationForm());
+    setChangedPrices(null);
     setSubmitAttempted(false);
     setBadRequest(null);
     setGeneralError(null);
@@ -197,7 +294,84 @@ export function OrderSimulation() {
     setItemNotice(null);
   }
 
+  /** Opens the confirmation step for the current simulation */
+  function openCreation() {
+    if (blocker || isLocked || creatingRef.current) return;
+    setCreation({ phase: "confirming" });
+  }
+
+  /** The user confirmed: a new creation attempt with a new request ID */
+  function confirmCreation() {
+    if (!simulated || blocker || creatingRef.current) return;
+    void submitCreation(toCreateRequest(simulated, crypto.randomUUID()));
+  }
+
+  /** Repeats the unanswered request exactly as it was sent */
+  function retryCreation() {
+    if (creation.phase !== "answered" || creation.outcome.kind !== "retry") return;
+    void submitCreation(creation.request);
+  }
+
+  async function submitCreation(request: CreateSalesOrderRequest) {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    savePendingRequest(sessionStore(), request);
+    setCreation({ phase: "submitting", request });
+
+    let outcome: CreationOutcome;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        outcome = creationOutcome(await createSalesOrder(request));
+      } catch (error) {
+        outcome = creationOutcome({ error });
+      }
+      // A concurrent change stored nothing; the same request is safe to repeat
+      const delay = CONCURRENT_RETRY_DELAYS_MS[attempt];
+      if (outcome.kind === "retry" && outcome.reason === "CONCURRENT_UPDATE" && delay !== undefined) {
+        await wait(delay);
+        continue;
+      }
+      break;
+    }
+    creatingRef.current = false;
+    // Only an unknown result must be kept for a repetition
+    if (outcome.kind !== "retry") clearPendingRequest(sessionStore());
+
+    if (outcome.kind === "created") {
+      // The order is done. Next.js keeps the state of this page while the
+      // confirmation is shown (Cache Components) and restores it on the way
+      // back, so the page must not keep the finished creation (it would stay
+      // locked as "submitting"): it starts a new, empty order instead.
+      clearOrder();
+      setCreation({
+        phase: "created",
+        salesOrderNumber: outcome.order.salesOrderNumber,
+        replayed: outcome.replayed,
+      });
+      router.push(
+        `/sales-orders/${outcome.order.salesOrderNumber}?created=${outcome.replayed ? "existing" : "new"}`,
+      );
+      return;
+    }
+    if ((outcome.kind === "price-changed" || outcome.kind === "invalid") && simulated) {
+      // The current evaluation of the ERP API replaces the old result; the
+      // input is unchanged (it was locked), so it belongs to the input
+      setSimulated({ ...simulated, result: outcome.evaluation });
+      setChangedPrices(
+        outcome.kind === "price-changed" ? changedPricesByItem(outcome.changedItems) : null,
+      );
+    }
+    setCreation({ phase: "answered", request, outcome });
+  }
+
   const loadError = units.loadError ?? materials.loadError ?? salesAreas.loadError;
+  // The document currency of the result, or of a recovered pending request
+  const resultCurrency =
+    simulated?.result.currency ??
+    (creation.phase === "answered" || creation.phase === "submitting"
+      ? creation.request.expectedTotal.currency
+      : null);
+  const decimals = resultCurrency ? currencyDecimals(salesAreas.items, resultCurrency) : undefined;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -211,12 +385,13 @@ export function OrderSimulation() {
         role="note"
         className="mt-6 rounded-md border border-brand/30 bg-brand-soft px-4 py-3 text-sm"
       >
-        <p className="font-medium text-brand-strong">Read-only simulation</p>
+        <p className="font-medium text-brand-strong">Simulation first</p>
         <p className="mt-0.5 text-ink">
-          No sales order is created, no delivery block is set and no stock is
-          reserved. A valid simulation does not guarantee that the order can
-          be delivered: stock, delivery date, freight, tax and credit are not
-          checked.
+          Simulating stores nothing: no sales order is created, no delivery block
+          is set and no stock is reserved. A sales order is only created when you
+          choose Create Sales Order and confirm it. A valid simulation does not
+          guarantee that the order can be delivered: stock, delivery date,
+          freight, tax and credit are not checked.
         </p>
       </div>
 
@@ -237,44 +412,51 @@ export function OrderSimulation() {
         <form noValidate onSubmit={handleSubmit} className="mt-6 space-y-6">
           {generalError && <FormErrorAlert messages={generalError} />}
 
-          <OrderHeaderForm
-            values={form}
-            salesAreas={salesAreas.items}
-            salesAreasError={salesAreas.loadError}
-            onSelectSalesArea={(salesArea) =>
-              change((v) => selectSalesArea(v, salesArea, units.items ?? []))
-            }
-            units={units.items}
-            unitsError={units.loadError}
-            errors={headerErrors}
-            partnerMessages={current ? partnerRoleMessages(current) : {}}
-            fieldMessages={current ? headerFieldMessages(current) : {}}
-            onSelectUnit={(unitId) =>
-              change((v) => selectUnit(v, units.items?.find((u) => u.unitId === unitId)))
-            }
-            orderDate={today}
-            onChange={(changes) => change((v) => ({ ...v, ...changes }))}
-          />
+          {/* Locked while an order is created or its result is unknown */}
+          <fieldset
+            disabled={isLocked}
+            data-locked={isLocked || undefined}
+            className="min-w-0 space-y-6"
+          >
+            <OrderHeaderForm
+              values={form}
+              salesAreas={salesAreas.items}
+              salesAreasError={salesAreas.loadError}
+              onSelectSalesArea={(salesArea) =>
+                change((v) => selectSalesArea(v, salesArea, units.items ?? []))
+              }
+              units={units.items}
+              unitsError={units.loadError}
+              errors={headerErrors}
+              partnerMessages={current ? partnerRoleMessages(current) : {}}
+              fieldMessages={current ? headerFieldMessages(current) : {}}
+              onSelectUnit={(unitId) =>
+                change((v) => selectUnit(v, units.items?.find((u) => u.unitId === unitId)))
+              }
+              orderDate={today}
+              onChange={(changes) => change((v) => ({ ...v, ...changes }))}
+            />
 
-          <OrderItemsEditor
-            items={form.items}
-            errors={itemErrors}
-            itemListError={submitAttempted ? clientErrors.itemList : undefined}
-            resultMessages={current ? itemMessagesByIndex(current) : new Map()}
-            materials={materialsByNumber}
-            search={search}
-            onChange={(key, changes) => change((v) => updateItem(v, key, changes))}
-            onAdd={() => change(addItem)}
-            onRemove={(key) => change((v) => removeItem(v, key))}
-            notice={itemNotice}
-            onQuantityEnter={handleQuantityEnter}
-          />
+            <OrderItemsEditor
+              items={form.items}
+              errors={itemErrors}
+              itemListError={submitAttempted ? clientErrors.itemList : undefined}
+              resultMessages={current ? itemMessagesByIndex(current) : new Map()}
+              materials={materialsByNumber}
+              search={search}
+              onChange={(key, changes) => change((v) => updateItem(v, key, changes))}
+              onAdd={() => change(addItem)}
+              onRemove={(key) => change((v) => removeItem(v, key))}
+              notice={itemNotice}
+              onQuantityEnter={handleQuantityEnter}
+            />
+          </fieldset>
 
           <div className="flex flex-wrap items-center justify-end gap-3">
             <button
               type="button"
               onClick={reset}
-              disabled={isSimulating}
+              disabled={isSimulating || isLocked}
               className="rounded-md border border-line bg-surface px-4 py-2 font-medium hover:bg-canvas disabled:opacity-50"
             >
               Reset
@@ -283,6 +465,7 @@ export function OrderSimulation() {
               type="submit"
               disabled={
                 isSimulating ||
+                isLocked ||
                 units.items === null ||
                 materials.items === null ||
                 salesAreas.items === null ||
@@ -301,11 +484,23 @@ export function OrderSimulation() {
           <SimulationResult
             result={simulated.result}
             isOutdated={isOutdated}
-            decimals={
-              simulated.result.currency
-                ? currencyDecimals(salesAreas.items, simulated.result.currency)
-                : undefined
-            }
+            decimals={decimals}
+            changedPrices={isOutdated ? undefined : (changedPrices ?? undefined)}
+          />
+        </div>
+      )}
+
+      {(simulated || creation.phase !== "idle") && !loadError && (
+        <div className="mt-6">
+          <CreateOrderPanel
+            result={simulated && !isOutdated ? simulated.result : null}
+            blocker={blocker}
+            creation={creation}
+            decimals={decimals}
+            onOpen={openCreation}
+            onCancel={() => setCreation(IDLE)}
+            onConfirm={confirmCreation}
+            onRetry={retryCreation}
           />
         </div>
       )}
