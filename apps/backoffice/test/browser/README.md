@@ -7,6 +7,7 @@ database `b2b_erp` are never used.
 ```
 npm run test:browser                  # build both apps, then test
 npm run test:browser -- --skip-build  # reuse the existing builds
+npm run test:browser -- --keep        # keep logs and screenshots after success
 npm run test:browser:safety           # unit tests of the safety rules
 ```
 
@@ -103,6 +104,8 @@ ERP API integration and E2E tests use their own ports (55433, 55435).
   (`evaluate`, `waitFor`, request recording and interception)
 - `lib/fixtures.mjs` – test data
 - `suites/sales-orders.mjs` – Sprint 10C: create and confirm sales orders
+- `suites/sales-order-overview.mjs` – Sprint 10D-B: the sales order overview
+  (an empty part runs first, the main part last; see `SUITES` in `run.mjs`)
 
 A new suite is a module whose default export receives
 `{ page, api, sql, urls, fixtures, check, section }`; add it to `SUITES` in
@@ -140,7 +143,7 @@ Interactions must wait for what a user would see, never for a fixed time:
   (`b2b-browser-test-<runId>-…`) is kept and printed at the end. It
   contains the logs of every service (`erp-api.log`, `backoffice.log`, …) and
   screenshots (`screenshots/timeout.png` on a timeout). After a successful
-  run the folder is removed.
+  run the folder is removed, unless `--keep` is given.
 - **Build notes**: `next build` writes the production build to `.next`; a
   running `next dev` uses `.next/dev` and keeps working. `nest build` writes
   `apps/erp-api/dist`, which `npm run start` of the ERP API also uses; a

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { ApiError, errorMessage } from "@/lib/erp-api";
 import { SOURCE_LABELS } from "@/lib/price-check";
+import { OVERVIEW_STORAGE_KEY } from "@/lib/sales-order-overview";
 import {
   createdNotice,
   isSalesOrderNumber,
@@ -138,11 +139,36 @@ function Problem({ kind, title, text }: { kind: string; title: string; text: str
   );
 }
 
+const noSubscription = () => () => {};
+
+function lastOverviewQuery(): string | null {
+  try {
+    return window.sessionStorage.getItem(OVERVIEW_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Back to the overview page (search, filters, page) the user came from */
+function BackToOverview() {
+  const query = useSyncExternalStore(noSubscription, lastOverviewQuery, () => null);
+  return (
+    <Link
+      href={query ? `/sales-orders?${query}` : "/sales-orders"}
+      data-back-to-overview
+      className="mr-auto rounded-md border border-line bg-surface px-4 py-2 font-medium hover:bg-canvas"
+    >
+      Back to Sales Orders
+    </Link>
+  );
+}
+
 function OrderDocument({ order }: { order: SalesOrder }) {
   const money = (amount: string) => orderAmount(order, amount);
   return (
     <article data-sales-order={order.salesOrderNumber} className="space-y-4">
       <div className="flex flex-wrap justify-end gap-2 print:hidden">
+        <BackToOverview />
         <Link
           href="/sales-orders/simulation"
           className="rounded-md border border-line bg-surface px-4 py-2 font-medium hover:bg-canvas"

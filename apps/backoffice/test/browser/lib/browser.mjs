@@ -98,6 +98,8 @@ export class Page {
     // requests per path
     this.requestPaths = new Map();
     this.finished = new Map();
+    // Method and full URL of every request of the page, in order
+    this.requests = [];
   }
 
   async open() {
@@ -130,6 +132,7 @@ export class Page {
       const { method, url, postData } = msg.params.request;
       const path = URL.canParse(url) ? new URL(url).pathname : url;
       this.requestPaths.set(msg.params.requestId, path);
+      this.requests.push({ method, url });
       if (this.recordPattern && method === "POST" && this.recordPattern.test(path)) {
         this.recorded.push(JSON.parse(postData));
       }

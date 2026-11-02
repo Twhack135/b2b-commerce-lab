@@ -10,7 +10,7 @@
 // is never used. Every resource is removed afterwards, also on failure or
 // Ctrl+C, and only resources this run created are removed. See README.md.
 //
-// Usage: npm run test:browser [-- --skip-build]
+// Usage: npm run test:browser [-- --skip-build] [--keep]
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -27,9 +27,15 @@ import {
   assertTestPorts,
   serviceEnvironment,
 } from "./lib/safety.mjs";
+import salesOrderOverviewSuite, { emptyOverviewSuite } from "./suites/sales-order-overview.mjs";
 import salesOrderSuite from "./suites/sales-orders.mjs";
 
-const SUITES = [["Sales orders (Sprint 10C)", salesOrderSuite]];
+// In this order: the empty overview needs a database without orders
+const SUITES = [
+  ["Sales order overview: no orders yet (Sprint 10D-B)", emptyOverviewSuite],
+  ["Sales orders (Sprint 10C)", salesOrderSuite],
+  ["Sales order overview (Sprint 10D-B)", salesOrderOverviewSuite],
+];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const BACKOFFICE = resolve(here, "../..");
@@ -52,6 +58,8 @@ try {
   process.exit(1);
 }
 const skipBuild = process.argv.includes("--skip-build");
+// Keeps logs and screenshots also after a successful run
+const keep = process.argv.includes("--keep");
 
 /** Cleanup steps in creation order; run in reverse, every one of them */
 const cleanups = [];
@@ -212,7 +220,7 @@ try {
   console.log("\nCleaning up:");
   await cleanUp();
 }
-if (runDir && ok) {
+if (runDir && ok && !keep) {
   rmSync(runDir, { recursive: true, force: true });
 } else if (runDir) {
   console.log(`Logs and screenshots kept for analysis: ${runDir}`);

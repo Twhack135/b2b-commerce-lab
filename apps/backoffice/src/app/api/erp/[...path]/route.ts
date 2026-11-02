@@ -18,6 +18,29 @@ type Route = {
   params?: Record<string, RegExp>;
   /** Overrides TIMEOUT_MS for a slow endpoint */
   timeoutMs?: number;
+  /**
+   * The query parameters this route forwards, each with its format check.
+   * Without it, query strings are never forwarded.
+   */
+  query?: Record<string, (value: string) => boolean>;
+};
+
+const isKey = (value: string) => /^\S([\s\S]*\S)?$/.test(value) && value.length <= 20;
+
+// GET /sales-orders: the parameters of the order list (Sprint 10D-A). The
+// ERP API validates them completely; the proxy only lets these through.
+const SALES_ORDER_LIST_QUERY: Route["query"] = {
+  q: (value) => /\S/.test(value) && value.length <= 100,
+  salesOrganization: (value) => /^[A-Z0-9]{4}$/.test(value),
+  distributionChannel: (value) => /^[A-Z0-9]{2}$/.test(value),
+  division: (value) => /^[A-Z0-9]{2}$/.test(value),
+  soldTo: isKey,
+  unitId: isKey,
+  deliveryBlock: (value) => value === "SALES_REVIEW" || value === "NONE",
+  orderDateFrom: (value) => /^\d{4}-\d{2}-\d{2}$/.test(value),
+  orderDateTo: (value) => /^\d{4}-\d{2}-\d{2}$/.test(value),
+  limit: (value) => /^(100|[1-9]\d?)$/.test(value),
+  after: (value) => /^\d{10}$/.test(value),
 };
 
 // ":param" matches exactly one path segment, e.g. a material number.
@@ -73,6 +96,8 @@ const ALLOWED_ROUTES: Route[] = [
   // Creates a sales order. The ERP API transaction may wait up to 25 s for
   // locks, so the proxy waits longer than for other requests.
   { method: "POST", path: ["sales-orders"], timeoutMs: 30_000 },
+  // The read-only order list with search, filters and pagination
+  { method: "GET", path: ["sales-orders"], query: SALES_ORDER_LIST_QUERY },
   // A stored sales order; only 10-digit numbers, so e.g. "simulate" never
   // matches this route
   {
@@ -123,8 +148,11 @@ async function proxy(
     });
   }
 
-  // Query strings are not forwarded; no ERP endpoint uses them yet
-  const target = `${erpApiUrl()}/${path.map(encodeURIComponent).join("/")}`;
+  // Query strings are only forwarded for routes that list their parameters,
+  // and only those parameters, each once and in a valid format
+  const query = forwardedQuery(route, new URL(request.url).searchParams);
+  if (query instanceof Response) return query;
+  const target = `${erpApiUrl()}/${path.map(encodeURIComponent).join("/")}${query}`;
   const hasBody = route.method !== "GET";
 
   let upstream: Response;
@@ -169,6 +197,32 @@ async function proxy(
         upstream.headers.get("Content-Type") ?? "application/json",
     },
   });
+}
+
+/**
+ * "" or "?..." with the checked parameters of the route, rebuilt from
+ * scratch; a 400 response if the request has a parameter the route does
+ * not allow, a repeated parameter or a value in a wrong format
+ */
+function forwardedQuery(route: Route, params: URLSearchParams): string | Response {
+  if (!route.query) return "";
+  const forwarded = new URLSearchParams();
+  for (const name of new Set(params.keys())) {
+    const check = Object.hasOwn(route.query, name) ? route.query[name] : undefined;
+    if (!check) {
+      return errorResponse(400, `Query parameter ${name} is not supported.`);
+    }
+    const values = params.getAll(name);
+    if (values.length > 1) {
+      return errorResponse(400, `Query parameter ${name} must be given only once.`);
+    }
+    if (!check(values[0])) {
+      return errorResponse(400, `Query parameter ${name} has an invalid value.`);
+    }
+    forwarded.set(name, values[0]);
+  }
+  const text = forwarded.toString();
+  return text ? `?${text}` : "";
 }
 
 function errorResponse(

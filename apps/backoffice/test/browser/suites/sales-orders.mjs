@@ -219,10 +219,13 @@ export default async function salesOrderSuite({ page, api, sql, urls, fixtures, 
   check("Browser back: a new simulation can be created", (await evaluate("$status()")) === "VALID" && (await evaluate("!$create().disabled")));
   await evaluate("[...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Pricing').click()");
   await waitFor("location.pathname === '/pricing'", "pricing via sidebar");
+  // Sidebar "Sales Orders" opens the overview (Sprint 10D-B), its action the simulation
   await evaluate("[...document.querySelectorAll('nav a')].find(a => a.textContent.includes('Sales Orders')).click()");
-  await waitFor("location.pathname === '/sales-orders/simulation' && !!document.getElementById('unitId')", "simulation via sidebar");
+  await waitFor("location.pathname === '/sales-orders' && !!document.querySelector('[data-overview-state]')", "overview via sidebar");
+  await evaluate("[...document.querySelectorAll('main a')].find(a => a.textContent.trim() === 'New Order Simulation').click()");
+  await waitFor("location.pathname === '/sales-orders/simulation' && !!document.getElementById('unitId')", "simulation via overview");
   await page.installHelpers();
-  check("Sidebar 'Sales Orders': no reload, form usable", (await evaluate("window.$noReload")) === "same page load" && (await usable()));
+  check("Sidebar 'Sales Orders' and 'New Order Simulation': no reload, form usable", (await evaluate("window.$noReload")) === "same page load" && (await usable()));
 
   // ---------------------------------------------------------------- confirmation page
   section("Confirmation page by URL and snapshots");
@@ -423,7 +426,7 @@ export default async function salesOrderSuite({ page, api, sql, urls, fixtures, 
   // ---------------------------------------------------------------- proxy
   section("Proxy security restrictions");
   const proxy = await evaluate(`Promise.all([
-    fetch('/api/erp/sales-orders').then(r => r.status + ' ' + r.headers.get('Allow')),
+    fetch('/api/erp/sales-orders').then(r => String(r.status)),
     fetch('/api/erp/sales-orders', { method: 'PUT', body: '{}' }).then(r => r.status + ' ' + r.headers.get('Allow')),
     fetch('/api/erp/sales-orders/1000000001', { method: 'DELETE' }).then(r => r.status + ' ' + r.headers.get('Allow')),
     fetch('/api/erp/sales-orders/1000000001', { method: 'PATCH', body: '{}' }).then(r => r.status + ' ' + r.headers.get('Allow')),
@@ -431,12 +434,12 @@ export default async function salesOrderSuite({ page, api, sql, urls, fixtures, 
     fetch('/api/erp/sales-orders/abc').then(r => String(r.status)),
     fetch('/api/erp/sales-orders/simulate').then(r => r.status + ' ' + r.headers.get('Allow')),
   ]).then(a => a.join(' | '))`);
-  check("No list, no change, no delete, no release, only 10-digit numbers", proxy === "405 POST | 405 POST | 405 GET | 405 GET | 404 | 404 | 405 POST", proxy);
+  check("List read-only (10D-B), no change, no delete, no release, only 10-digit numbers", proxy === "200 | 405 POST, GET | 405 GET | 405 GET | 404 | 404 | 405 POST", proxy);
   check("Nothing was changed by the blocked requests", orderCount() === 10);
   await goto(`${BASE}/pricing`, "document.querySelectorAll('tr[data-condition]').length >= 8");
   check("Pricing still loads", true);
-  await goto(`${BASE}/sales-orders`, "location.pathname === '/sales-orders/simulation'");
-  check("/sales-orders still opens the simulation", true);
+  await goto(`${BASE}/sales-orders`, "document.querySelector('[data-overview-state]')?.dataset.overviewState === 'orders'");
+  check("/sales-orders opens the Sales Order overview (Sprint 10D-B)", true);
 
   // ---------------------------------------------------------------- mobile
   section("Mobile 390px");

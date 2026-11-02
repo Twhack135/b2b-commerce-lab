@@ -215,3 +215,37 @@ export async function createSalesOrder(request: CreateSalesOrderRequest) {
 export function getSalesOrder(salesOrderNumber: string) {
   return erpFetch<SalesOrder>(`/sales-orders/${encodeURIComponent(salesOrderNumber)}`);
 }
+
+/** A stored sales order in the order list: header data and snapshots only */
+export type SalesOrderSummary = {
+  salesOrderNumber: string;
+  orderDate: string;
+  createdAt: string;
+  status: "OPEN";
+  deliveryBlock: "SALES_REVIEW" | null;
+  salesArea: SalesAreaKey;
+  soldTo: { customerNumber: string; name: string };
+  unit: { unitId: string; name: string };
+  customerReference: string | null;
+  itemCount: number;
+  netValue: string;
+  currency: string;
+  currencyDecimals: number;
+};
+
+/**
+ * One page of GET /sales-orders, newest sales order number first. `total`
+ * counts all matching orders; `nextCursor` is the `after` of the next page.
+ */
+export type SalesOrderList = {
+  items: SalesOrderSummary[];
+  total: number;
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+};
+
+/** `query` is the query string from listQuery (sales-order-overview.ts) */
+export function listSalesOrders(query: string) {
+  return erpFetch<SalesOrderList>(`/sales-orders${query ? `?${query}` : ""}`);
+}

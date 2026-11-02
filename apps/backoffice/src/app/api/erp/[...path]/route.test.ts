@@ -321,6 +321,14 @@ describe("allowed routes are forwarded", () => {
     assert.equal(init.body, undefined);
   });
 
+  it("GET /sales-orders/:salesOrderNumber does not forward query strings", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, {}));
+
+    await call("GET", ["sales-orders", "1000000001"], undefined, "?limit=5&x=1");
+
+    assert.equal(upstreamCall(fetchMock).url, "http://erp.test:3000/sales-orders/1000000001");
+  });
+
   it("encodes the account number inside the members path", async () => {
     const fetchMock = mockUpstream(upstreamJson(200, {}));
 
@@ -330,6 +338,83 @@ describe("allowed routes are forwarded", () => {
       upstreamCall(fetchMock).url,
       "http://erp.test:3000/customer-accounts/A%2FB/members",
     );
+  });
+});
+
+describe("GET /sales-orders (order list, Sprint 10D-B)", () => {
+  const list = { items: [], total: 0, limit: 25, hasMore: false, nextCursor: null };
+
+  it("forwards without query", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, list));
+
+    const response = await call("GET", ["sales-orders"]);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), list);
+    const { url, init } = upstreamCall(fetchMock);
+    assert.equal(url, "http://erp.test:3000/sales-orders");
+    assert.equal(init.method, "GET");
+    assert.equal(init.body, undefined);
+  });
+
+  it("forwards every documented parameter, encoded", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, list));
+    const query =
+      "?q=M%C3%BCller+%26+S%C3%B6hne&salesOrganization=1000&distributionChannel=10&division=00&soldTo=CUST-1000&unitId=UNIT-STUTTGART&deliveryBlock=SALES_REVIEW&orderDateFrom=2026-11-01&orderDateTo=2026-11-30&limit=100&after=1000000026";
+
+    const response = await call("GET", ["sales-orders"], undefined, query);
+
+    assert.equal(response.status, 200);
+    assert.equal(upstreamCall(fetchMock).url, `http://erp.test:3000/sales-orders${query}`);
+  });
+
+  it("passes the 400 of the ERP API through, e.g. a date that does not exist", async () => {
+    const body = { statusCode: 400, message: ["orderDateFrom must be a valid date"], error: "Bad Request" };
+    mockUpstream(upstreamJson(400, body));
+
+    const response = await call("GET", ["sales-orders"], undefined, "?orderDateFrom=2026-02-30");
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), body);
+  });
+
+  for (const [name, query, message] of [
+    ["an unknown parameter", "?page=2", "Query parameter page is not supported."],
+    ["a before cursor", "?before=1000000001", "Query parameter before is not supported."],
+    ["an upstream URL", "?target=http://evil.test", "Query parameter target is not supported."],
+    ["an inherited property name", "?__proto__=x", "Query parameter __proto__ is not supported."],
+    ["a constructor property name", "?constructor=x", "Query parameter constructor is not supported."],
+    ["a repeated parameter", "?limit=10&limit=20", "Query parameter limit must be given only once."],
+    ["a repeated search", "?q=a&q=b", "Query parameter q must be given only once."],
+    ["limit 0", "?limit=0", "Query parameter limit has an invalid value."],
+    ["limit 101", "?limit=101", "Query parameter limit has an invalid value."],
+    ["a malformed cursor", "?after=1000000001%26x%3D1", "Query parameter after has an invalid value."],
+    ["an empty search", "?q=", "Query parameter q has an invalid value."],
+    ["a search of 101 characters", `?q=${"x".repeat(101)}`, "Query parameter q has an invalid value."],
+    ["a lower-case sales organization", "?salesOrganization=abcd", "Query parameter salesOrganization has an invalid value."],
+    ["an unknown delivery block", "?deliveryBlock=CREDIT", "Query parameter deliveryBlock has an invalid value."],
+    ["a date in another form", "?orderDateTo=30.11.2026", "Query parameter orderDateTo has an invalid value."],
+    ["a soldTo with spaces", "?soldTo=%20CUST", "Query parameter soldTo has an invalid value."],
+    ["a unitId of 21 characters", `?unitId=${"U".repeat(21)}`, "Query parameter unitId has an invalid value."],
+  ] as const) {
+    it(`rejects ${name} with 400 without calling the ERP API`, async () => {
+      const fetchMock = mockUpstream(upstreamJson(200, list));
+
+      const response = await call("GET", ["sales-orders"], undefined, query);
+
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { statusCode: 400, message });
+      assert.equal(fetchMock.mock.callCount(), 0);
+    });
+  }
+
+  it("still creates orders with POST and ignores a query string there", async () => {
+    const fetchMock = mockUpstream(upstreamJson(201, {}));
+
+    const response = await call("POST", ["sales-orders"], {}, "?limit=5");
+
+    assert.equal(response.status, 201);
+    assert.equal(upstreamCall(fetchMock).url, "http://erp.test:3000/sales-orders");
   });
 });
 
@@ -404,8 +489,8 @@ describe("blocked routes are never forwarded", () => {
     ["GET", ["condition-types", "ZP02"]],
     ["PATCH", ["condition-types", "ZP02"]],
     ["GET", ["condition-type"]],
-    // Sales orders: only simulation, creation and reading one order by its
-    // 10-digit number (Sprint 10C); no list, changes or status actions yet
+    // Sales orders: only simulation, creation, the list (Sprint 10D-B) and
+    // reading one order by its 10-digit number; no changes or status actions
     ["GET", ["sales-orders", "4711"]],
     ["GET", ["sales-orders", "100000000"]],
     ["GET", ["sales-orders", "10000000011"]],
@@ -489,11 +574,13 @@ describe("blocked methods are never forwarded", () => {
     ["PUT", ["sales-orders", "simulate"], "POST"],
     ["PATCH", ["sales-orders", "simulate"], "POST"],
     ["DELETE", ["sales-orders", "simulate"], "POST"],
-    // Sprint 10C: orders are created, read one by one, never changed or deleted
-    ["GET", ["sales-orders"], "POST"],
-    ["PUT", ["sales-orders"], "POST"],
-    ["PATCH", ["sales-orders"], "POST"],
-    ["DELETE", ["sales-orders"], "POST"],
+    // Orders are created, listed (Sprint 10D-B) and read one by one, never
+    // changed or deleted
+    ["PUT", ["sales-orders"], "POST, GET"],
+    ["PATCH", ["sales-orders"], "POST, GET"],
+    ["DELETE", ["sales-orders"], "POST, GET"],
+    ["HEAD", ["sales-orders"], "POST, GET"],
+    ["OPTIONS", ["sales-orders"], "POST, GET"],
     ["DELETE", ["sales-orders", "1000000001"], "GET"],
     ["PATCH", ["sales-orders", "1000000001"], "GET"],
     ["PUT", ["sales-orders", "1000000001"], "GET"],

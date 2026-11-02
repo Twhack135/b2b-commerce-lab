@@ -9,8 +9,8 @@
 //   price (ZP02) for München.
 //   Stuttgart: 2 x MAT-001 = 8800.00 (ZP03), 10 x MAT-002 = 1895.00 (ZP02)
 //   -> 10695.00 EUR
-// - Poland 2000/10/00 (PLN): PL-1000 with UNIT-WARSZAWA, deliberately
-//   without prices
+// - Poland 2000/10/00 (PLN): PL-1000 with UNIT-WARSZAWA; only MAT-101 has
+//   a list price (45.50 PLN), MAT-001 deliberately none
 // - Japan 3000/10/00 (JPY): JP-1000 with UNIT-OSAKA, list price of MAT-001
 //   700000 JPY
 
@@ -95,6 +95,7 @@ export async function createFixtures(api) {
       muenchenMat002: await condition({ conditionTypeCode: "ZP02", ...GERMANY, materialNumber: "MAT-002", scope: "B2B_UNIT", unitId: "UNIT-MUENCHEN", amount: "179.00", validFrom: "2026-06-15" }),
       specialMat001: await condition({ conditionTypeCode: "ZP03", ...GERMANY, materialNumber: "MAT-001", scope: "SOLD_TO", soldToCustomerNumber: "CUST-1000", amount: "4400.00", validFrom: "2026-10-29" }),
       japanMat001: await listPrice(JAPAN, "MAT-001", "700000"),
+      polandMat101: await listPrice(POLAND, "MAT-101", "45.50"),
     },
   };
 }

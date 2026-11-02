@@ -1,4 +1,5 @@
 // Building blocks shared by the master data list pages (materials, customers)
+import Link from "next/link";
 import {
   AlertIcon,
   CheckIcon,
@@ -13,6 +14,7 @@ export function PageHeader({
   description,
   actionLabel,
   onAction,
+  actionHref,
   secondaryAction,
 }: {
   /** Small label above the title, e.g. the module area */
@@ -22,9 +24,13 @@ export function PageHeader({
   /** The primary action is optional, e.g. for tool pages */
   actionLabel?: string;
   onAction?: () => void;
+  /** Makes the primary action a link to this page instead of a button */
+  actionHref?: string;
   secondaryAction?: { label: string; onClick: () => void };
 }) {
-  const hasActions = (actionLabel && onAction) || secondaryAction;
+  const hasActions = (actionLabel && (onAction || actionHref)) || secondaryAction;
+  const actionClass =
+    "inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 font-medium text-white shadow-sm hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand";
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div>
@@ -45,12 +51,14 @@ export function PageHeader({
             {secondaryAction.label}
           </button>
         )}
-        {actionLabel && onAction && (
-          <button
-            type="button"
-            onClick={onAction}
-            className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 font-medium text-white shadow-sm hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-          >
+        {actionLabel && actionHref && (
+          <Link href={actionHref} className={actionClass}>
+            <PlusIcon />
+            {actionLabel}
+          </Link>
+        )}
+        {actionLabel && onAction && !actionHref && (
+          <button type="button" onClick={onAction} className={actionClass}>
             <PlusIcon />
             {actionLabel}
           </button>
@@ -169,14 +177,17 @@ export function SearchInput({
   placeholder,
   value,
   onChange,
+  className = "relative flex-1 sm:w-72 sm:flex-none",
 }: {
   label: string;
   placeholder: string;
   value: string;
   onChange: (value: string) => void;
+  /** Size and placement; a fixed width on larger screens by default */
+  className?: string;
 }) {
   return (
-    <label className="relative flex-1 sm:w-72 sm:flex-none">
+    <label className={className}>
       <span className="sr-only">{label}</span>
       <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" />
       <input
