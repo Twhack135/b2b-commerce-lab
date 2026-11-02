@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { clearUnitCookies, forbidden, redirectTo, unsupportedMediaType } from "@/lib/server/auth-responses";
+import { clearUnitCookies, redirectTo, refusedForm, unsupportedMediaType } from "@/lib/server/auth-responses";
 import { login } from "@/lib/server/erp-shop-api";
 import {
   clientAddress,
@@ -18,7 +18,7 @@ import {
 export async function POST(request: NextRequest) {
   const origin = sameOrigin(request.headers);
   const cookie = origin && sessionCookie(origin);
-  if (!origin || !cookie) return forbidden();
+  if (!origin || !cookie) return refusedForm("/login?error=request");
   if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
     return unsupportedMediaType();
   }

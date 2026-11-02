@@ -4,8 +4,12 @@ import { AuthPanel } from "@/components/auth-panel";
 
 export const metadata: Metadata = {
   title: "Activate access",
-  // The page is opened with a personal link: no referrer to other sites
-  referrer: "no-referrer",
+  // The page is opened with a personal link: no referrer to other sites.
+  // Not "no-referrer": browsers then send "Origin: null" with forms, and
+  // the policy stays for the whole document, so the sign-in form reached
+  // with "Continue to sign in" would fail the shop's origin check. The
+  // token is in the fragment, which is never part of a referrer anyway.
+  referrer: "same-origin",
 };
 
 /** First password with the one-time link from the supplier (no self-registration) */

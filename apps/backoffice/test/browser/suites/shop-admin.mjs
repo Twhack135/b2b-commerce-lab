@@ -160,8 +160,8 @@ export default async function shopAdminSuite({ page, api, urls, sql, shopService
   check("A forged cookie with a unit of another account selects nothing and shows nothing of it", (await unitsShown()) === JSON.stringify(["UNIT-MUENCHEN", "UNIT-STUTTGART"]) && !(await evaluate("document.body.innerText.includes('Warszawa')")) && (await evaluate("$text('[data-notice=info]')")).includes("no longer available"));
   const selectForeign = await evaluate("fetch('/api/units/select', { method: 'POST', body: new URLSearchParams({ unitId: 'UNIT-WARSZAWA' }) }).then(r => new URL(r.url).search)");
   check("Choosing a unit of another account is refused", selectForeign === "?unit=unavailable" && (await cookieNamed("shop_unit")) === undefined);
-  const csrf = await fetch(`${SHOP}/api/units/select`, { method: "POST", redirect: "manual", headers: { Origin: "http://evil.example", "Content-Type": "application/x-www-form-urlencoded", Cookie: `shop_session=${annaCookie.value}` }, body: "unitId=UNIT-STUTTGART" }).then((r) => r.status);
-  check("Choosing a unit from another site is refused (CSRF, 403)", csrf === 403);
+  const csrf = await fetch(`${SHOP}/api/units/select`, { method: "POST", redirect: "manual", headers: { Origin: "http://evil.example", "Content-Type": "application/x-www-form-urlencoded", Cookie: `shop_session=${annaCookie.value}` }, body: "unitId=UNIT-STUTTGART" }).then((r) => ({ status: r.status, location: r.headers.get("location"), cookies: r.headers.getSetCookie().length }));
+  check("Choosing a unit from another site is refused (CSRF): back to the account page, nothing remembered", csrf.status === 303 && csrf.location === "/account" && csrf.cookies === 0, JSON.stringify(csrf));
 
   section("Cross-account isolation");
   const piotrCookie = await shopLogin(PIOTR);

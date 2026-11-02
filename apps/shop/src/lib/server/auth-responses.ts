@@ -7,7 +7,18 @@ import { LOCAL_SESSION_COOKIE, LOCAL_UNIT_COOKIE, SECURE_SESSION_COOKIE, SECURE_
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
-/** Not from a page of this shop (CSRF protection) */
+/**
+ * A browser form (sign-in, sign-out, unit choice) that did not come from a
+ * page of this shop (CSRF protection): nothing was done. A browser would
+ * show a JSON answer as a raw technical page, so the form is sent back to
+ * a page of the shop instead. The address is relative: the Host of a
+ * refused request is not trusted.
+ */
+export function refusedForm(path: "/login?error=request" | "/account") {
+  return new NextResponse(null, { status: 303, headers: { Location: path, ...NO_STORE } });
+}
+
+/** Not from a page of this shop (CSRF protection); for script requests (JSON) */
 export function forbidden() {
   return NextResponse.json({ statusCode: 403, message: "Request not allowed." }, { status: 403, headers: NO_STORE });
 }

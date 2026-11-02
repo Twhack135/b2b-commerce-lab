@@ -198,7 +198,7 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 
 **C1 – Generic failure**
 1. Shop `/login` (normal window): Anna's address with a wrong password.
-2. Expected: "Invalid e-mail address or password." The same message for an
+2. Expected: "Incorrect email or password. Please try again." The same message for an
    unknown address such as `nobody@mueller.example`.
 
 **C2 – Sign in**
@@ -300,7 +300,7 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 1. Sign in as Anna. BO: Anna → **Disable user**, confirm.
 2. Expected: BO shows "Disabled"; units stay listed with "No access".
    Shop: reload → sign-in page.
-3. Try to sign in as Anna: "Invalid e-mail address or password." (no hint
+3. Try to sign in as Anna: "Incorrect email or password. Please try again." (no hint
    that the user is disabled).
 4. BO list, filter **No access**: Anna is listed.
 

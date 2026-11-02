@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { clearSessionCookies, forbidden, redirectTo } from "@/lib/server/auth-responses";
+import { clearSessionCookies, redirectTo, refusedForm } from "@/lib/server/auth-responses";
 import { logout } from "@/lib/server/erp-shop-api";
 import { sameOrigin, sessionTokenFrom } from "@/lib/server/request-security";
 
@@ -9,7 +9,8 @@ import { sameOrigin, sessionTokenFrom } from "@/lib/server/request-security";
  */
 export async function POST(request: NextRequest) {
   const origin = sameOrigin(request.headers);
-  if (!origin) return forbidden();
+  // Refused: the session stays as it is
+  if (!origin) return refusedForm("/account");
   await logout(sessionTokenFrom(request.cookies, request.headers.get("host")));
   const response = redirectTo(origin, "/login?signedOut=1");
   clearSessionCookies(response);

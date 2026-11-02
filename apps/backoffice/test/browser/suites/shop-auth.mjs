@@ -82,6 +82,16 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
   check("Password set: confirmation and the way to sign in", (await evaluate("$text('[data-activation=done]')")).includes("Your password is set") && (await evaluate("document.querySelector('[data-activation=done] a').getAttribute('href')")) === "/login?activated=1");
   check("Only an Argon2id hash is stored", sql("SELECT password_hash LIKE '$argon2id$v=19$m=19456,t=2,p=1$%' FROM shop_user_credentials") === "t" && !sql("SELECT password_hash FROM shop_user_credentials").includes(PASSWORD));
 
+  // Found in the Sprint 12C acceptance test: after "Continue to sign in" (a
+  // link within the same document) the activation page's referrer policy
+  // made the browser send "Origin: null"; a wrong password then showed the
+  // raw JSON refusal of the origin check instead of the sign-in page
+  await evaluate("document.querySelector('[data-activation=done] a').click()");
+  await page.waitFor("location.pathname === '/login' && !!document.querySelector('[data-login-form]')?.offsetParent", "sign-in page after activation");
+  await evaluate(`$setEl(document.getElementById('email'), ${JSON.stringify(EMAIL)}); $setEl(document.getElementById('password'), 'wrong password 7654321'); document.querySelector('[data-login-form]').requestSubmit()`);
+  await arrived("location.search === '?error=invalid' && !!document.querySelector('[data-notice=error]')?.offsetParent", "wrong password after activation");
+  check("Right after activation, a wrong password stays on the sign-in page with a friendly message", (await evaluate("location.pathname")) === "/login" && (await evaluate("$text('[data-notice=error]')")) === "Incorrect email or password. Please try again." && !(await evaluate("document.body.innerText.includes('statusCode')")));
+
   // Opened again like from the e-mail: a new page load (from the same path,
   // a link that only differs in its fragment would not reload the page)
   await page.goto(`${SHOP}/`, "!!document.querySelector('[data-shop-shell]')");
@@ -96,7 +106,7 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
   section("Sign-in");
   await page.goto(`${SHOP}/account`, "location.pathname === '/login' && $vis(document.querySelector('[data-login-form]'))");
   check("Signed out: 'My account' leads to the sign-in page", true);
-  const failureText = "Invalid e-mail address or password.";
+  const failureText = "Incorrect email or password. Please try again.";
   await signIn(EMAIL, "wrong password 1234567");
   await arrived("location.search === '?error=invalid'", "wrong password");
   const wrongPassword = await evaluate("$text('[data-notice=error]')");
@@ -130,7 +140,8 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
       redirect: "manual",
       headers: { ...(origin ? { Origin: origin } : {}), ...(site ? { "Sec-Fetch-Site": site } : {}), "Content-Type": type, Cookie: `shop_session=${cookie.value}` },
       body,
-    }).then((r) => r.status);
+    }).then((r) => `${r.status} ${r.headers.get("location") ?? ""}`.trim());
+  const sessionsBefore = sql("SELECT count(*) FROM shop_sessions");
   const statuses = {
     "logout from another site": await send("/api/auth/logout", { origin: "http://evil.example" }),
     "logout without Origin": await send("/api/auth/logout"),
@@ -139,7 +150,10 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
     "activation from another site": await send("/api/auth/activate", { origin: "http://evil.example", type: "application/json", body: "{}" }),
     "login with another content type": await send("/api/auth/login", { origin: SHOP, type: "text/plain" }),
   };
-  check("Requests from other sites are refused (403); wrong content type 415", JSON.stringify(Object.values(statuses)) === JSON.stringify([403, 403, 403, 403, 403, 415]), JSON.stringify(statuses));
+  // Browser forms are sent back to a shop page (never a raw JSON page); the
+  // script route of the activation answers 403
+  check("Requests from other sites are refused: forms back to the shop (303), script requests 403; wrong content type 415", JSON.stringify(Object.values(statuses)) === JSON.stringify(["303 /account", "303 /account", "303 /account", "303 /login?error=request", "403", "415"]), JSON.stringify(statuses));
+  check("The refused requests changed nothing (no new or ended session)", sql("SELECT count(*) FROM shop_sessions") === sessionsBefore);
   check("GET on the sign-in routes is not allowed (405)", (await fetch(`${SHOP}/api/auth/login`)).status === 405 && (await fetch(`${SHOP}/api/auth/logout`)).status === 405);
   check("The refused sign-out did not end the session", (await erpSession(cookie.value)) === 200);
 
