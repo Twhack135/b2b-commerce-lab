@@ -188,6 +188,8 @@ model CustomerAccountMember {
   billToUnits       B2bUnit[]               @relation("UnitBillTo")
   payerUnits        B2bUnit[]               @relation("UnitPayer")
   shipToAssignments B2bUnitShipTo[]
+  // Shop users of the account; only an owner row (the account) has them
+  shopUsers         ShopUser[]
 
   @@unique([customerNumber, accountCustomerNumber])
   @@index([accountCustomerNumber])
@@ -225,6 +227,7 @@ model B2bUnit {
   priceConditions            PriceCondition[] @relation("PriceConditionUnit")
   priceConditionsInSalesArea PriceCondition[] @relation("PriceConditionUnitSalesArea")
   salesOrders                SalesOrder[]
+  shopUserAssignments        ShopUserUnit[]
 
   @@unique([unitId, accountCustomerNumber])
   // Target of the ship-to foreign key that repeats the sales area
@@ -565,4 +568,70 @@ model SalesOrderItemCondition {
   @@index([salesOrderNumber, salesOrganization, distributionChannel, division], map: "sales_order_item_conditions_order_idx")
   @@index([conditionId, salesOrganization, distributionChannel, division, materialNumber, conditionTypeCode, scope], map: "sales_order_item_conditions_condition_idx")
   @@map("sales_order_item_conditions")
+}
+
+// ---------------------------------------------------------------------------
+// Shop users (Sprint 12A): the people of a customer who may use the B2B
+// shop, and the B2B units they may act for. Login data (password, sessions)
+// follows in later sprints (docs/adr/0003, 0004).
+// ---------------------------------------------------------------------------
+
+enum ShopUserStatus {
+  ACTIVE
+  // Kept with its unit assignments, but authorized for nothing
+  DISABLED
+
+  @@map("shop_user_status")
+}
+
+enum ShopUserRole {
+  // Sees the prices and orders of the assigned units and may order
+  BUYER
+
+  @@map("shop_user_role")
+}
+
+/// A person of a customer account who may use the shop (SAP: contact
+/// person of the customer; SAP Commerce: B2B customer). Belongs to exactly
+/// one account, the owner row of customer_account_members.
+model ShopUser {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountCustomerNumber String         @map("account_customer_number") @db.VarChar(20)
+  // Copy of accountCustomerNumber: the foreign key below points to the
+  // account's owner row (customer_number = account_customer_number). CHECK
+  // constraint in the migration, as for customer_account_members.
+  accountOwnerRef       String         @map("account_owner_ref") @db.VarChar(20)
+  // Normalized: trimmed and lower case (CHECK constraint in the migration)
+  email                 String         @unique @db.VarChar(254)
+  displayName           String         @map("display_name") @db.VarChar(100)
+  status                ShopUserStatus @default(ACTIVE)
+  role                  ShopUserRole   @default(BUYER)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  account CustomerAccountMember @relation(fields: [accountCustomerNumber, accountOwnerRef], references: [customerNumber, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict, map: "shop_users_account_fkey")
+
+  units ShopUserUnit[]
+
+  // Target of the foreign key that keeps unit assignments in the user's account
+  @@unique([id, accountCustomerNumber], map: "shop_users_id_account_key")
+  @@index([accountCustomerNumber], map: "shop_users_account_idx")
+  @@map("shop_users")
+}
+
+/// A B2B unit a shop user may act for. Both foreign keys share
+/// account_customer_number, so the database only accepts units of the
+/// user's own account.
+model ShopUserUnit {
+  userId                String   @map("user_id") @db.Uuid
+  unitId                String   @map("unit_id") @db.VarChar(20)
+  accountCustomerNumber String   @map("account_customer_number") @db.VarChar(20)
+  assignedAt            DateTime @default(now()) @map("assigned_at") @db.Timestamptz(3)
+
+  user ShopUser @relation(fields: [userId, accountCustomerNumber], references: [id, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict, map: "shop_user_units_user_fkey")
+  unit B2bUnit  @relation(fields: [unitId, accountCustomerNumber], references: [unitId, accountCustomerNumber], onDelete: Restrict, onUpdate: Restrict, map: "shop_user_units_unit_fkey")
+
+  @@id([userId, unitId])
+  @@index([unitId, accountCustomerNumber], map: "shop_user_units_unit_idx")
+  @@map("shop_user_units")
 }
