@@ -2,15 +2,27 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import * as handlers from "./route.ts";
 
-// Calls the route handler like Next.js would for /api/erp/<path...>
-function call(method: string, path: string[], body?: unknown, query = "") {
+// Calls the route handler like Next.js would for /api/erp/<path...>, as a
+// page of the Backoffice on this computer would send it (Host, Origin)
+function call(
+  method: string,
+  path: string[],
+  body?: unknown,
+  query = "",
+  headers: Record<string, string> = {},
+) {
   const handler = handlers[method as keyof typeof handlers];
   const request = new Request(
     `http://localhost:3001/api/erp/${path.join("/")}${query}`,
     {
       method,
       body: body === undefined ? undefined : JSON.stringify(body),
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers: {
+        Host: "localhost:3001",
+        ...(method === "GET" || method === "HEAD" ? {} : { Origin: "http://localhost:3001" }),
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...headers,
+      },
     },
   );
   return handler(request, { params: Promise.resolve({ path }) });
@@ -689,5 +701,114 @@ describe("upstream responses", () => {
     const response = await call("GET", ["materials"]);
 
     assert.equal(response.status, 502);
+  });
+});
+
+describe("shop users (Sprint 12C)", () => {
+  const USER = "3f8b2c1e-6a0d-4c1b-9f2e-1d2c3b4a5e6f";
+  const SESSION = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+  for (const [method, path, body] of [
+    ["GET", ["shop-users"], undefined],
+    ["GET", ["shop-users", USER], undefined],
+    ["POST", ["shop-users"], { accountCustomerNumber: "CUST-1000", email: "a@b.example", displayName: "A" }],
+    ["PATCH", ["shop-users", USER], { status: "DISABLED" }],
+    ["PUT", ["shop-users", USER, "units", "UNIT-STUTTGART"], undefined],
+    ["DELETE", ["shop-users", USER, "units", "UNIT-STUTTGART"], undefined],
+    ["POST", ["shop-users", USER, "activation-link"], undefined],
+    ["POST", ["shop-users", USER, "sessions", SESSION, "revoke"], undefined],
+    ["POST", ["shop-users", USER, "sessions", "revoke-all"], undefined],
+  ] as const) {
+    it(`${method} /${path.join("/")} is forwarded and never cached`, async () => {
+      const fetchMock = mockUpstream(upstreamJson(200, { ok: true }));
+
+      const response = await call(method, [...path], body);
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      const { url, init } = upstreamCall(fetchMock);
+      assert.equal(url, `http://erp.test:3000/${path.join("/")}`);
+      assert.equal(init.method, method);
+      assert.equal(init.body, body === undefined ? undefined : JSON.stringify(body));
+    });
+  }
+
+  for (const path of [
+    ["shop-users", "not-a-uuid"],
+    ["shop-users", `${USER}x`],
+    ["shop-users", USER, "units"],
+    ["shop-users", USER, "sessions"],
+    ["shop-users", USER, "sessions", "not-a-uuid", "revoke"],
+    ["shop-users", USER, "password"],
+    ["shop-users", USER, "credentials"],
+    ["shop-users", USER, "activation-link", "x"],
+  ]) {
+    it(`GET/POST /${path.join("/")} -> 404`, async () => {
+      const fetchMock = mockUpstream(upstreamJson(200, {}));
+      assert.equal((await call("GET", path)).status, 404);
+      assert.equal((await call("POST", path)).status, 404);
+      assert.equal(fetchMock.mock.callCount(), 0);
+    });
+  }
+
+  it("never reads activation links with GET", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, {}));
+    const response = await call("GET", ["shop-users", USER, "activation-link"]);
+    assert.equal(response.status, 405);
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+});
+
+describe("local-only boundary (Sprint 12C)", () => {
+  it("refuses requests addressed to another host name (DNS rebinding)", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, []));
+    for (const host of ["attacker.example:3001", "localhost.attacker.example:3001", "127.0.0.1.nip.io:3001"]) {
+      const read = await call("GET", ["shop-users"], undefined, "", { Host: host });
+      assert.equal(read.status, 403, host);
+      assert.equal(read.headers.get("Cache-Control"), "no-store");
+      const write = await call("POST", ["shop-users", "3f8b2c1e-6a0d-4c1b-9f2e-1d2c3b4a5e6f", "activation-link"], undefined, "", { Host: host, Origin: `http://${host}` });
+      assert.equal(write.status, 403, host);
+    }
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("forwards changes only from the Backoffice's own pages (CSRF)", async () => {
+    const fetchMock = mockUpstream(upstreamJson(201, {}));
+    const body = { accountCustomerNumber: "CUST-1000", email: "a@b.example", displayName: "A" };
+    for (const headers of [
+      { Origin: "" },
+      { Origin: "http://attacker.example" },
+      { Origin: "http://127.0.0.1:3001" },
+      { Origin: "null" },
+      { "Sec-Fetch-Site": "cross-site" },
+      { "Sec-Fetch-Site": "same-site" },
+    ] as Record<string, string>[]) {
+      const response = await call("POST", ["shop-users"], body, "", headers);
+      assert.equal(response.status, 403, JSON.stringify(headers));
+    }
+    // Also the existing admin routes, e.g. a price condition
+    assert.equal((await call("POST", ["price-conditions"], {}, "", { Origin: "http://attacker.example" })).status, 403);
+    assert.equal(fetchMock.mock.callCount(), 0);
+    assert.equal((await call("POST", ["shop-users"], body, "", { "Sec-Fetch-Site": "same-origin" })).status, 201);
+  });
+
+  it("accepts JSON bodies only (no form or text/plain requests)", async () => {
+    const fetchMock = mockUpstream(upstreamJson(201, {}));
+    for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"]) {
+      const response = await call("POST", ["shop-users"], { email: "a@b.example" }, "", { "Content-Type": type });
+      assert.equal(response.status, 415, type);
+    }
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("never caches answers, also errors and refusals", async () => {
+    mockUpstream(upstreamJson(422, { message: "x" }));
+    for (const response of [
+      await call("GET", ["shop-users", "x", "y", "z"]),
+      await call("POST", ["shop-users"], {}),
+      await call("DELETE", ["materials"]),
+    ]) {
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+    }
   });
 });

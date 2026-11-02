@@ -14,6 +14,13 @@ npm run dev
 
 Open [http://localhost:3001](http://localhost:3001).
 
+> **Local development only.** The Backoffice has no administrator sign-in.
+> It manages master data, prices, orders and, since Sprint 12C, shop users
+> and their activation links. It must only run on this computer and must
+> never be made reachable from other computers (docs/adr/0006, 0007). Its
+> ERP proxy refuses foreign host names (DNS rebinding) and state-changing
+> requests from other sites (CSRF); this is no substitute for a sign-in.
+
 ## Scripts
 
 | Command             | Purpose                                 |
@@ -23,6 +30,7 @@ Open [http://localhost:3001](http://localhost:3001).
 | `npm run start`     | Run the production build on port 3001   |
 | `npm run lint`      | ESLint                                  |
 | `npm run typecheck` | TypeScript check                        |
+| `npm run acceptance:env` | Disposable environment for manual acceptance tests (docs/testing) |
 
 ## How it talks to the ERP API
 

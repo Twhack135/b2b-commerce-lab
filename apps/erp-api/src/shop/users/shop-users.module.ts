@@ -3,9 +3,9 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { ShopUsersService } from './shop-users.service';
 
 /**
- * Shop users and their unit authorizations (Sprint 12A). Internal only:
- * no controllers. Login, sessions and administration endpoints follow in
- * later sprints and will use ShopUsersService.
+ * Shop users and their unit authorizations (Sprint 12A). No controllers of
+ * its own: the sign-in and account context (/shop/v1) and the local
+ * administration (/shop-users, Sprint 12C) use ShopUsersService.
  */
 @Module({
   imports: [PrismaModule],

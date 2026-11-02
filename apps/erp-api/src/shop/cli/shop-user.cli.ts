@@ -1,9 +1,11 @@
-// Local, server-side tool for shop users (Sprint 12B), until the Backoffice
-// manages them (Sprint 12C). There is deliberately no HTTP endpoint that
+// Local, server-side tool for shop users (Sprint 12B). Since Sprint 12C the
+// Backoffice manages shop users too (local admin API /shop-users); this tool
+// stays for scripts and tests. There is no customer-facing endpoint that
 // creates users or issues activation links.
 //
 //   npm run shop:user -- create --account CUST-1000 --email anna@example.com --name "Anna Weber" [--unit UNIT-STUTTGART ...]
 //   npm run shop:user -- activation --email anna@example.com [--shop-url http://127.0.0.1:3002]
+//   (default: SHOP_PUBLIC_URL of the root .env, else http://127.0.0.1:3002)
 //
 // The activation link is printed once to this terminal; it is valid for 24
 // hours and only once. Treat it like a password: never paste it into
@@ -12,6 +14,11 @@
 
 import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import {
+  activationLink,
+  SHOP_PUBLIC_URL_ENV,
+  shopOrigin,
+} from '../auth/activation-link';
 import { ShopAuthModule } from '../auth/shop-auth.module';
 import { ShopAuthService } from '../auth/shop-auth.service';
 import { ShopUsersModule } from '../users/shop-users.module';
@@ -56,11 +63,15 @@ function assertLocalDatabase(): void {
 }
 
 function shopUrl(args: string[]): string {
-  const url = new URL(option(args, 'shop-url') ?? 'http://127.0.0.1:3002');
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('--shop-url must be an http(s) address.');
+  const origin = shopOrigin(
+    option(args, 'shop-url') ?? process.env[SHOP_PUBLIC_URL_ENV],
+  );
+  if (!origin) {
+    throw new Error(
+      '--shop-url must be an https address or http on this computer.',
+    );
   }
-  return url.origin;
+  return origin;
 }
 
 async function main(args: string[]): Promise<void> {
@@ -103,8 +114,7 @@ async function main(args: string[]): Promise<void> {
     const { token, expiresAt } = await app
       .get(ShopAuthService)
       .issueActivation(user.id);
-    // The fragment (#) is never sent to a server or in a Referer header
-    const link = `${shopUrl(args)}/activate#token=${token}`;
+    const link = activationLink(shopUrl(args), token);
     console.log(
       json
         ? JSON.stringify({ link, expiresAt: expiresAt.toISOString() })

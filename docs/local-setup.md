@@ -11,6 +11,7 @@ files without values are committed.
 | `POSTGRES_PASSWORD` | `.env` (repository root) | Docker Compose | Password of the development database |
 | `DATABASE_URL` | `.env` (repository root) | ERP API, Prisma | Connection to the development database (same password) |
 | `SHOP_SERVICE_KEY` | `.env` (repository root) | ERP API | Key the ERP shop API `/shop/v1` expects from the shop |
+| `SHOP_PUBLIC_URL` | `.env` (repository root, optional) | ERP API | Shop address in activation links; default `http://127.0.0.1:3002` (https, or http on this computer only) |
 | `ERP_API_URL` | `apps/backoffice/.env.local` (optional) | Backoffice server | ERP address; default `http://localhost:3000` |
 | `ERP_API_URL` | `apps/shop/.env.local` | Shop server | ERP address, e.g. `http://127.0.0.1:3000` |
 | `SHOP_SERVICE_KEY` | `apps/shop/.env.local` | Shop server | The same value as in the root `.env` |
@@ -53,11 +54,17 @@ customer data (docs/adr/0002).
 4. Before committing, `git status` must not list any `.env` or `.env.local`
    file.
 
-## Shop users for local testing
+## Shop users
 
-There is no self-registration. Until the Backoffice manages shop users
-(Sprint 12C), a local command-line tool creates them and issues the
-one-time activation link (after `npm run build` in `apps/erp-api`):
+There is no self-registration. Shop users are managed in the Backoffice
+under **Shop Users** (Sprint 12C): create a user for a customer account,
+assign its units, create the one-time activation link, end sessions,
+disable and enable. The Backoffice has **no administrator sign-in**: it is
+safe on this computer only and must never be reachable from other
+computers (docs/adr/0006, 0007).
+
+For scripts and tests, a local command-line tool does the same for
+creating users and links (after `npm run build` in `apps/erp-api`):
 
 ```bash
 cd apps/erp-api
@@ -65,11 +72,13 @@ npm run shop:user -- create --account CUST-1000 --email anna@example.com --name 
 npm run shop:user -- activation --email anna@example.com
 ```
 
-The database needs the sign-in migration
-`20261103090000_add_shop_authentication` first (apply it only with a backup,
-like the runbook in `docs/runbooks/` describes for the previous migration).
+The development database has the sign-in migration
+`20261103090000_add_shop_authentication` since Sprint 12B; Sprint 12C needs
+no further migration. For trying things out, prefer the disposable
+acceptance environment (`docs/testing/sprint-12c-manual-acceptance.md`):
+users created in `b2b_erp` stay there.
 
-The link is printed once (`http://127.0.0.1:3002/activate#token=...`),
+The link is shown (or printed) once (`http://127.0.0.1:3002/activate#token=...`),
 works once and for 24 hours. Treat it like a password. The tool writes
 into the database of the root `.env` and refuses databases that are not on
 this computer.
@@ -88,6 +97,7 @@ without activity and at the latest after 10 hours.
 | Key missing in `apps/shop/.env.local`, or `ERP_API_URL` not on this computer | – | never calls the ERP; `/api/health` answers 503; the reason is only in the shop's server log |
 | Different keys in the two files | `/shop/v1` answers 401 | `/api/health` answers 503 |
 | `HOST` other than loopback, e.g. `0.0.0.0` | refuses to start | – |
+| A request whose Host header is not `127.0.0.1`, `localhost` or `[::1]` (e.g. DNS rebinding) | answers 403 | – (the Backoffice proxy answers 403 as well) |
 
 ## Starting
 

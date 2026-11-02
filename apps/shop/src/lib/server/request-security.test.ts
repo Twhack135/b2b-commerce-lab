@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   clientAddress,
+  isUnitIdFormat,
   trustedProxyHops,
   LOCAL_SESSION_COOKIE,
+  LOCAL_UNIT_COOKIE,
   sameOrigin,
   SECURE_SESSION_COOKIE,
+  SECURE_UNIT_COOKIE,
+  selectedUnitFrom,
   sessionCookie,
   sessionTokenFrom,
+  unitCookie,
 } from "./request-security.ts";
 
 const headers = (values: Record<string, string | undefined>) => ({
@@ -92,5 +97,29 @@ describe("client address (IP trust model)", () => {
       assert.equal(trustedProxyHops({ SHOP_TRUSTED_PROXY_HOPS: value }), 0, value);
     }
     assert.equal(trustedProxyHops({ SHOP_TRUSTED_PROXY_HOPS: "1" }), 1);
+  });
+});
+
+describe("unit selection cookie (Sprint 12C)", () => {
+  it("has the attributes of the session cookie and its own name", () => {
+    assert.deepEqual(unitCookie(new URL("https://shop.example.com")), {
+      name: SECURE_UNIT_COOKIE,
+      options: { httpOnly: true, sameSite: "lax", path: "/", secure: true },
+    });
+    assert.deepEqual(unitCookie(new URL("http://127.0.0.1:3002")), {
+      name: LOCAL_UNIT_COOKIE,
+      options: { httpOnly: true, sameSite: "lax", path: "/", secure: false },
+    });
+    assert.equal(unitCookie(new URL("http://shop.example.com")), null);
+  });
+
+  it("reads a plausible unit ID only; the local name only on this computer", () => {
+    assert.equal(selectedUnitFrom(cookies({ [LOCAL_UNIT_COOKIE]: "UNIT-STUTTGART" }), "127.0.0.1:3002"), "UNIT-STUTTGART");
+    assert.equal(selectedUnitFrom(cookies({ [LOCAL_UNIT_COOKIE]: "UNIT-STUTTGART" }), "shop.example.com"), undefined);
+    assert.equal(selectedUnitFrom(cookies({ [SECURE_UNIT_COOKIE]: "UNIT-OSAKA" }), "shop.example.com"), "UNIT-OSAKA");
+    for (const value of ["", "UNIT STUTTGART", "x".repeat(21), "UNIT\r\nX-Injected: 1", "ÜNIT"]) {
+      assert.equal(selectedUnitFrom(cookies({ [LOCAL_UNIT_COOKIE]: value }), "127.0.0.1:3002"), undefined, value);
+      assert.equal(isUnitIdFormat(value), false, value);
+    }
   });
 });

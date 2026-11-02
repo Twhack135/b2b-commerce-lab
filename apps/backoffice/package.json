@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --test \"src/**/*.test.ts\"",
     "test:browser": "node test/browser/run.mjs",
-    "test:browser:safety": "node --test test/browser/lib/safety.test.mjs"
+    "test:browser:safety": "node --test test/browser/lib/safety.test.mjs",
+    "acceptance:env": "node test/browser/acceptance-env.mjs"
   },
   "dependencies": {
     "next": "16.4.3",

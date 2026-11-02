@@ -12,6 +12,8 @@ import { readShopServerConfig } from "./config";
 const SERVICE_KEY_HEADER = "X-Shop-Service-Key";
 const SESSION_HEADER = "X-Shop-Session";
 const CLIENT_ADDRESS_HEADER = "X-Shop-Client-Address";
+/** The unit the user chose (a preference; the ERP checks it every time) */
+const UNIT_HEADER = "X-Shop-Unit";
 const TIMEOUT_MS = 10_000;
 
 /** The fixed paths the shop calls; nothing else is ever requested */
@@ -19,8 +21,8 @@ type ShopApiPath =
   | "/shop/v1/health"
   | "/shop/v1/auth/login"
   | "/shop/v1/auth/activation"
-  | "/shop/v1/auth/session"
-  | "/shop/v1/auth/logout";
+  | "/shop/v1/auth/logout"
+  | "/shop/v1/account";
 
 type Answer = { status: number; body: unknown };
 
@@ -30,7 +32,13 @@ type Answer = { status: number; body: unknown };
  */
 async function callShopApi(
   path: ShopApiPath,
-  options: { method?: "GET" | "POST"; body?: unknown; sessionToken?: string; clientAddress?: string } = {},
+  options: {
+    method?: "GET" | "POST";
+    body?: unknown;
+    sessionToken?: string;
+    clientAddress?: string;
+    unitId?: string;
+  } = {},
 ): Promise<Answer> {
   const config = readShopServerConfig(process.env);
   if (!config.ok) {
@@ -44,6 +52,7 @@ async function callShopApi(
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (options.sessionToken) headers[SESSION_HEADER] = options.sessionToken;
   if (options.clientAddress) headers[CLIENT_ADDRESS_HEADER] = options.clientAddress;
+  if (options.unitId) headers[UNIT_HEADER] = options.unitId;
   try {
     const response = await fetch(`${config.erpApiUrl}${path}`, {
       method: options.method ?? "GET",
@@ -83,9 +92,19 @@ export type ShopUser = {
   account: { customerNumber: string; name: string };
 };
 
-export type ShopSession = {
+/** A unit the user may act for; canOrder is false while it is inactive */
+export type ShopUnit = { unitId: string; name: string; canOrder: boolean };
+
+/**
+ * The signed-in user's working context, checked by the ERP on this request:
+ * the authorized units and the selected one (always one of them, or null).
+ */
+export type ShopAccount = {
   user: ShopUser;
-  units: { unitId: string; name: string; canOrder: boolean }[];
+  units: ShopUnit[];
+  selectedUnit: ShopUnit | null;
+  /** The remembered unit is not (or no longer) authorized */
+  requestedUnitRejected: boolean;
   expiresAt: string;
 };
 
@@ -136,11 +155,20 @@ export async function activate(input: {
   return { ok: false, failure: failureOf(answer.status), messages: [] };
 }
 
-/** The session of the token, or null (signed out, expired or ERP unavailable) */
-export async function currentSession(sessionToken: string | undefined): Promise<ShopSession | null> {
+/**
+ * The account context of the session, with the remembered unit checked by
+ * the ERP; null when signed out, expired, no longer allowed or ERP
+ * unavailable.
+ */
+export async function currentAccount(
+  sessionToken: string | undefined,
+  unitId: string | undefined,
+): Promise<ShopAccount | null> {
   if (!sessionToken) return null;
-  const answer = await callShopApi("/shop/v1/auth/session", { sessionToken });
-  return answer.status === 200 ? (answer.body as ShopSession) : null;
+  const answer = await callShopApi("/shop/v1/account", { sessionToken, unitId });
+  // 401 is a normal signed-out answer; 0 was already logged
+  if (![0, 200, 401].includes(answer.status)) console.error(`Shop: ERP shop API answered HTTP ${answer.status}`);
+  return answer.status === 200 ? (answer.body as ShopAccount) : null;
 }
 
 export async function logout(sessionToken: string | undefined): Promise<void> {

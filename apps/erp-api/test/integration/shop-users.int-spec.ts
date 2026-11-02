@@ -548,10 +548,12 @@ describe('Shop users and unit authorization (Sprint 12A)', () => {
       ).toMatchObject({ total: 1 });
     });
 
-    it('offers no shop user endpoints', async () => {
+    // Since Sprint 12C the local admin API manages users (/shop-users,
+    // shop-users-admin-api.int-spec.ts); the customer API never does
+    it('offers no shop user management in the customer API', async () => {
       for (const path of [
         '/shop/v1/users',
-        '/shop-users',
+        '/shop/v1/shop-users',
         '/shop/v1/users/x/units',
       ]) {
         await http().get(path).expect(404);

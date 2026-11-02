@@ -176,7 +176,9 @@ export default async function salesOrderOverviewSuite({ page, api, urls, check, 
   await page.select("salesAreaFilter", "1000/10/00", `$total() === '${(await apiList(GERMANY)).total}'`);
   check("Complete sales area 1000/10/00 in the URL", (await evaluate("location.search")) === "?salesOrganization=1000&distributionChannel=10&division=00");
   await page.select("salesAreaFilter", "", `$total() === '${everything.total}'`);
-  const today = everything.items[0].orderDate;
+  // The earliest order date of this run: order dates are local to each
+  // sales area, so a Japanese order is already "tomorrow" in the evening
+  const today = everything.items.map((o) => o.orderDate).sort()[0];
   const dayBefore = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
   await evaluate(`$setEl(document.getElementById('orderDateTo'), '${dayBefore}')`);
   await settled(`location.search === '?orderDateTo=${dayBefore}' && $state() === 'no-matches'`, "date to yesterday");

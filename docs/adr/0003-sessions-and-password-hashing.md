@@ -76,9 +76,10 @@ Status: accepted; implemented in Sprint 12B (with the deviations below)
    prefix only with `Secure`, so local HTTP uses `shop_session` (HttpOnly,
    SameSite=Lax, Path=/) and only on loopback addresses; over HTTPS it is
    `__Host-shop_session` with `Secure`. No sign-in over plain HTTP elsewhere.
-3. **Activation links from a local command-line tool** (`npm run shop:user`
-   in `apps/erp-api`) instead of the Backoffice, until the Backoffice manages
-   shop users (Sprint 12C). There is no endpoint that issues links.
+3. **Activation links** first came from a local command-line tool
+   (`npm run shop:user` in `apps/erp-api`). Since Sprint 12C the Backoffice
+   creates them through the local admin API (docs/adr/0007); the tool
+   stays for scripts and tests. No customer-facing endpoint issues links.
 4. **Password policy:** NIST SP 800-63B Rev. 4 for passwords as the only
    factor: at least 15 characters, at most 128, no composition rules,
    Unicode NFKC, common values and the e-mail address refused.

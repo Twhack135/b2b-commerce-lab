@@ -17,16 +17,14 @@ import {
   PasswordPolicyError,
   TooManyAttemptsError,
 } from './shop-auth.errors';
+import { isSessionOpen, SESSION_LIFETIME_MS } from './session-rules';
 import { isTokenFormat, newToken, tokenHash } from './tokens';
 
 const MINUTE = 60_000;
 
 /** An activation link is valid for 24 hours */
 export const ACTIVATION_LIFETIME_MS = 24 * 60 * MINUTE;
-/** A session ends after 30 minutes without requests ... */
-export const SESSION_IDLE_MS = 30 * MINUTE;
-/** ... and at the latest 10 hours after sign-in */
-export const SESSION_LIFETIME_MS = 10 * 60 * MINUTE;
+export { SESSION_IDLE_MS, SESSION_LIFETIME_MS } from './session-rules';
 /** last_seen_at is written at most once a minute per session */
 const SESSION_TOUCH_MS = MINUTE;
 
@@ -150,8 +148,9 @@ export class ShopAuthService implements OnModuleInit {
 
   /**
    * A new activation link for an active user of an active account who has
-   * no password yet. Replaces an earlier, unused link. Internal only (no
-   * endpoint): the raw token is returned once and never stored.
+   * no password yet. Replaces an earlier, unused link. Used by the local
+   * tool and the local admin API (/shop-users, Sprint 12C), never by the
+   * shop API: the raw token is returned once and never stored.
    */
   async issueActivation(
     userId: string,
@@ -353,13 +352,7 @@ export class ShopAuthService implements OnModuleInit {
         user: { select: SESSION_USER_SELECT },
       },
     });
-    if (
-      !session ||
-      session.revokedAt ||
-      session.expiresAt <= now ||
-      now.getTime() - session.lastSeenAt.getTime() >= SESSION_IDLE_MS ||
-      !mayUseShop(session.user)
-    ) {
+    if (!session || !isSessionOpen(session, now) || !mayUseShop(session.user)) {
       return null;
     }
     if (now.getTime() - session.lastSeenAt.getTime() >= SESSION_TOUCH_MS) {

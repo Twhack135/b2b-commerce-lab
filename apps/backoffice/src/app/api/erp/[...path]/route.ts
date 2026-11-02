@@ -4,12 +4,25 @@
  *
  * Only the routes listed in ALLOWED_ROUTES are forwarded. Everything else is
  * answered here and never reaches the ERP API.
+ *
+ * Local development only: neither the Backoffice nor the ERP admin API has
+ * an administrator sign-in (docs/adr/0006, 0007). Requests must be
+ * addressed to this computer (no DNS rebinding), state-changing requests
+ * must come from the Backoffice's own pages (no CSRF) and carry JSON.
+ * Answers are never cached.
  */
+
+import {
+  isJsonContentType,
+  isLocalHost,
+  isSafeMethod,
+  isSameOrigin,
+} from "../../../../lib/request-guard.ts";
 
 const DEFAULT_ERP_API_URL = "http://localhost:3000";
 const TIMEOUT_MS = 10_000;
 
-type Method = "GET" | "POST" | "PATCH" | "PUT";
+type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 type Route = {
   method: Method;
@@ -26,6 +39,8 @@ type Route = {
 };
 
 const isKey = (value: string) => /^\S([\s\S]*\S)?$/.test(value) && value.length <= 20;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // GET /sales-orders: the parameters of the order list (Sprint 10D-A). The
 // ERP API validates them completely; the proxy only lets these through.
@@ -105,6 +120,38 @@ const ALLOWED_ROUTES: Route[] = [
     path: ["sales-orders", ":salesOrderNumber"],
     params: { salesOrderNumber: /^\d{10}$/ },
   },
+  // Shop users (Sprint 12C), local administration only (see above). No
+  // answer contains a password or token hash; only the activation link
+  // route returns a secret, exactly once.
+  { method: "GET", path: ["shop-users"] },
+  { method: "GET", path: ["shop-users", ":userId"], params: { userId: UUID } },
+  { method: "POST", path: ["shop-users"] },
+  { method: "PATCH", path: ["shop-users", ":userId"], params: { userId: UUID } },
+  {
+    method: "PUT",
+    path: ["shop-users", ":userId", "units", ":unitId"],
+    params: { userId: UUID },
+  },
+  {
+    method: "DELETE",
+    path: ["shop-users", ":userId", "units", ":unitId"],
+    params: { userId: UUID },
+  },
+  {
+    method: "POST",
+    path: ["shop-users", ":userId", "activation-link"],
+    params: { userId: UUID },
+  },
+  {
+    method: "POST",
+    path: ["shop-users", ":userId", "sessions", ":sessionId", "revoke"],
+    params: { userId: UUID, sessionId: UUID },
+  },
+  {
+    method: "POST",
+    path: ["shop-users", ":userId", "sessions", "revoke-all"],
+    params: { userId: UUID },
+  },
 ];
 
 /** Read at request time; never taken from the incoming request */
@@ -134,6 +181,11 @@ async function proxy(
 ) {
   const { path } = await ctx.params;
 
+  // Only requests addressed to this computer (DNS rebinding)
+  if (!isLocalHost(request.headers.get("host"))) {
+    return errorResponse(403, "Request not allowed.");
+  }
+
   const routesForPath = ALLOWED_ROUTES.filter((route) =>
     matchesPath(route, path),
   );
@@ -148,12 +200,21 @@ async function proxy(
     });
   }
 
+  // Changes only from the Backoffice's own pages (CSRF), with JSON bodies
+  if (!isSafeMethod(route.method) && !isSameOrigin(request.headers)) {
+    return errorResponse(403, "Request not allowed.");
+  }
+  const body = isSafeMethod(route.method) ? "" : await request.text();
+  if (body !== "" && !isJsonContentType(request.headers.get("content-type"))) {
+    return errorResponse(415, "Unsupported content type.");
+  }
+
   // Query strings are only forwarded for routes that list their parameters,
   // and only those parameters, each once and in a valid format
   const query = forwardedQuery(route, new URL(request.url).searchParams);
   if (query instanceof Response) return query;
   const target = `${erpApiUrl()}/${path.map(encodeURIComponent).join("/")}${query}`;
-  const hasBody = route.method !== "GET";
+  const hasBody = body !== "";
 
   let upstream: Response;
   try {
@@ -162,7 +223,7 @@ async function proxy(
       headers: hasBody
         ? { "Content-Type": "application/json", Accept: "application/json" }
         : { Accept: "application/json" },
-      body: hasBody ? await request.text() : undefined,
+      body: hasBody ? body : undefined,
       cache: "no-store",
       redirect: "manual",
       signal: AbortSignal.timeout(route.timeoutMs ?? TIMEOUT_MS),
@@ -195,6 +256,8 @@ async function proxy(
     headers: {
       "Content-Type":
         upstream.headers.get("Content-Type") ?? "application/json",
+      // Admin data, and once an activation link, never goes into a cache
+      "Cache-Control": "no-store",
     },
   });
 }
@@ -230,7 +293,10 @@ function errorResponse(
   message: string,
   headers?: Record<string, string>,
 ) {
-  return Response.json({ statusCode: status, message }, { status, headers });
+  return Response.json(
+    { statusCode: status, message },
+    { status, headers: { "Cache-Control": "no-store", ...headers } },
+  );
 }
 
 // Every method goes through the same check, so unsupported methods are

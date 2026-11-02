@@ -16,3 +16,25 @@ export function loopbackHost(host: string | undefined): string {
   }
   return value;
 }
+
+const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '[::1]'];
+
+/**
+ * True if the Host header of a request names this computer (any port).
+ * Listening on loopback alone does not stop a web page from reaching the
+ * API through DNS rebinding: a foreign domain that resolves to 127.0.0.1
+ * still carries its own name in the Host header, so such requests are
+ * refused before any route runs (docs/adr/0007).
+ */
+export function isLoopbackHostHeader(host: string | undefined): boolean {
+  if (!host) return false;
+  try {
+    const url = new URL(`http://${host}`);
+    return (
+      LOOPBACK_HOSTNAMES.includes(url.hostname) &&
+      url.host === host.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}

@@ -116,9 +116,19 @@ ERP API integration and E2E tests use their own ports (55433, 55435).
   users are created in the test database with the ERP's `shop:user` tool;
   its output (activation links) is never printed, and diagnostics never
   show URL fragments
+- `suites/shop-admin.mjs` – Sprint 12C: shop users in the Backoffice
+  (create, units of the own account only, activation link shown once,
+  sessions, disable/enable), unit selection in the shop checked by the ERP,
+  cross-account isolation, immediate permission changes, the local-only
+  boundary (Host, Origin, framing) and secrets in logs. Runs before the
+  12B suite and removes its shop users at the end
 - `suites/shop-foundation.mjs` – Sprint 11: shop frame, security headers,
   health checks, the shop/ERP boundary, the service key and the refused
   non-local binding of the ERP API (runs last)
+- `acceptance-env.mjs` – not a test: `npm run acceptance:env` starts the
+  same kind of disposable environment on other ports (3310, 3311, 3313,
+  55470) and keeps it running for the manual acceptance test
+  (`docs/testing/sprint-12c-manual-acceptance.md`) until Ctrl+C
 
 A new suite is a module whose default export receives
 `{ page, api, sql, urls, fixtures, check, section }`; add it to `SUITES` in

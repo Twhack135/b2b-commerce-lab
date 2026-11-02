@@ -31,6 +31,7 @@ import {
 } from "./lib/safety.mjs";
 import salesOrderOverviewSuite, { emptyOverviewSuite } from "./suites/sales-order-overview.mjs";
 import salesOrderSuite from "./suites/sales-orders.mjs";
+import shopAdminSuite from "./suites/shop-admin.mjs";
 import shopAuthSuite from "./suites/shop-auth.mjs";
 import shopFoundationSuite from "./suites/shop-foundation.mjs";
 
@@ -40,6 +41,9 @@ const SUITES = [
   ["Sales orders (Sprint 10C)", salesOrderSuite],
   ["Sales order overview (Sprint 10D-B)", salesOrderOverviewSuite],
   ["Shop foundation (Sprint 11)", shopFoundationSuite],
+  // Before the sign-in suite: that one locks sign-ins without a trusted
+  // client address for the rest of the run; this one removes its users
+  ["Shop user administration (Sprint 12C)", shopAdminSuite],
   ["Shop sign-in (Sprint 12B)", shopAuthSuite],
 ];
 
@@ -135,13 +139,15 @@ async function main() {
   const migrated = database.sql("SELECT current_database() || ':' || (SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL)");
   step(`migrations applied in ${migrated.split(":")[0]} (${migrated.split(":")[1]})`);
 
-  // 4. ERP API, only on 127.0.0.1, only with the test database
+  // 4. ERP API, only on 127.0.0.1, only with the test database; its
+  // activation links point to the test shop
   const apiUrl = `http://127.0.0.1:${ports.api}`;
+  const shopUrl = `http://127.0.0.1:${ports.shop}`;
   /** An ERP API process of this run (cleaned up like every other) */
   const startErpApi = (name, settings) => {
     const owned = startProcess(name, process.execPath, [join(ERP_API, "dist/main.js")], {
       cwd: ERP_API,
-      env: serviceEnvironment(process.env, { DATABASE_URL: database.url, SHOP_SERVICE_KEY: shopServiceKey, ...settings }),
+      env: serviceEnvironment(process.env, { DATABASE_URL: database.url, SHOP_SERVICE_KEY: shopServiceKey, SHOP_PUBLIC_URL: shopUrl, ...settings }),
       logFile: join(runDir, `${name.replace(/W+/g, "-").toLowerCase()}.log`),
     });
     onCleanup(name, () => owned.stop());
@@ -184,7 +190,6 @@ async function main() {
   step(`Backoffice ready on ${boUrl} (and ${deadUrl} without ERP API)`);
 
   // 7. Shop, only on 127.0.0.1, with the test API and this run's service key
-  const shopUrl = `http://127.0.0.1:${ports.shop}`;
   const shop = startProcess("Shop", process.execPath, [join(SHOP, "node_modules/next/dist/bin/next"), "start", "--port", String(ports.shop), "--hostname", "127.0.0.1"], {
     cwd: SHOP,
     env: serviceEnvironment(process.env, { ERP_API_URL: assertTestApiUrl(apiUrl, ports.api), SHOP_SERVICE_KEY: shopServiceKey }),

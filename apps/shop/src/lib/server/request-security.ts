@@ -104,3 +104,35 @@ export function clientAddress(headers: RequestHeaders, hops: number): string | u
   const candidate = entries.length >= hops ? entries[entries.length - hops] : undefined;
   return candidate && /^[0-9a-fA-F:.]{2,45}$/.test(candidate) ? candidate : undefined;
 }
+
+// Unit selection (Sprint 12C, docs/adr/0007): the unit the user chose is
+// remembered in its own cookie with the same attributes as the session
+// cookie. It is only a preference: the ERP checks it on every request
+// against the units it authorizes for the session, so changing the cookie
+// can never select a unit the user may not use. It authenticates nothing.
+
+export const SECURE_UNIT_COOKIE = "__Host-shop_unit";
+export const LOCAL_UNIT_COOKIE = "shop_unit";
+
+/** A plausible unit ID (the ERP decides whether it exists and is allowed) */
+export function isUnitIdFormat(value: unknown): value is string {
+  return typeof value === "string" && /^[\x21-\x7e]{1,20}$/.test(value);
+}
+
+/** The unit cookie for this shop origin; null where no sign-in is allowed */
+export function unitCookie(origin: URL): CookieSettings | null {
+  const session = sessionCookie(origin);
+  if (!session) return null;
+  return { name: session.options.secure ? SECURE_UNIT_COOKIE : LOCAL_UNIT_COOKIE, options: session.options };
+}
+
+/** The chosen unit from the request cookies; local name only on this computer */
+export function selectedUnitFrom(
+  cookies: { get(name: string): { value: string } | undefined },
+  host: string | null,
+): string | undefined {
+  const value =
+    cookies.get(SECURE_UNIT_COOKIE)?.value ??
+    (host && isLoopbackHost(host) ? cookies.get(LOCAL_UNIT_COOKIE)?.value : undefined);
+  return isUnitIdFormat(value) ? value : undefined;
+}

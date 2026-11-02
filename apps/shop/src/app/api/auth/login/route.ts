@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { forbidden, redirectTo, unsupportedMediaType } from "@/lib/server/auth-responses";
+import { clearUnitCookies, forbidden, redirectTo, unsupportedMediaType } from "@/lib/server/auth-responses";
 import { login } from "@/lib/server/erp-shop-api";
 import {
   clientAddress,
@@ -39,5 +39,7 @@ export async function POST(request: NextRequest) {
 
   const response = redirectTo(origin, "/account");
   response.cookies.set(cookie.name, result.sessionToken, { ...cookie.options, expires: result.expiresAt });
+  // A unit remembered for an earlier person in this browser is not carried over
+  clearUnitCookies(response);
   return response;
 }

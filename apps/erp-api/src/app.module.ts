@@ -12,6 +12,7 @@ import { PricingModule } from './pricing/pricing.module';
 import { SalesAreasModule } from './sales-areas/sales-areas.module';
 import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 import { ShopModule } from './shop/shop.module';
+import { ShopUsersAdminModule } from './shop-users/shop-users-admin.module';
 
 @Module({
   imports: [
@@ -25,6 +26,8 @@ import { ShopModule } from './shop/shop.module';
     PriceConditionsModule,
     PricingModule,
     SalesOrdersModule,
+    // Local administration of shop users (admin API, Sprint 12C)
+    ShopUsersAdminModule,
     // Customer-facing API /shop/v1, separate from the admin API above
     ShopModule,
   ],

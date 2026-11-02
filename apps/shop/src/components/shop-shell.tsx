@@ -6,7 +6,13 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { AccountMenu } from "./account-menu";
 
-const NAV_ITEMS = ["Catalog", "Quick Order", "My Orders", "Account"];
+/** Areas of the shop; those without a page yet are shown as "Soon" */
+const NAV_ITEMS: { label: string; href?: string }[] = [
+  { label: "Catalog" },
+  { label: "Quick Order" },
+  { label: "My Orders" },
+  { label: "Account", href: "/account" },
+];
 
 export function ShopShell({ children }: { children: React.ReactNode }) {
   return (
@@ -38,8 +44,17 @@ export function ShopShell({ children }: { children: React.ReactNode }) {
 
           <nav aria-label="Shop" className="w-full sm:w-auto">
             <ul className="flex flex-wrap gap-1">
-              {NAV_ITEMS.map((label) => (
+              {NAV_ITEMS.map(({ label, href }) => (
                 <li key={label}>
+                  {href ? (
+                    <Link
+                      href={href}
+                      data-nav-item={label}
+                      className="inline-flex items-center rounded-md px-3 py-1.5 font-medium hover:bg-canvas hover:text-brand-strong"
+                    >
+                      {label}
+                    </Link>
+                  ) : (
                   <span
                     data-nav-item={label}
                     aria-disabled="true"
@@ -51,6 +66,7 @@ export function ShopShell({ children }: { children: React.ReactNode }) {
                       Soon
                     </span>
                   </span>
+                  )}
                 </li>
               ))}
             </ul>

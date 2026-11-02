@@ -48,6 +48,12 @@ export const CartIcon = (p: IconProps) => (
     d="M3 3h2l2.4 12.2a2 2 0 0 0 2 1.8h7.7a2 2 0 0 0 2-1.6L21 8H6M10 21h.01M17 21h.01"
   />
 );
+export const KeyIcon = (p: IconProps) => (
+  <Icon
+    {...p}
+    d="M15.5 7.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM12.5 10.5 4 19v2h3l1-1v-2h2v-2h2l1.5-1.5"
+  />
+);
 export const SearchIcon = (p: IconProps) => (
   <Icon {...p} d="m21 21-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z" />
 );

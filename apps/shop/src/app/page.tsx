@@ -37,8 +37,8 @@ export default function HomePage() {
       >
         <p className="font-semibold">Development preview</p>
         <p className="mt-1">
-          Sign-in, catalog and ordering are not available yet. This preview shows no customer data,
-          no prices and accepts no orders.
+          Signing in and choosing your ordering unit work already. Catalog, prices and ordering are not
+          available yet: this preview shows no prices and accepts no orders.
         </p>
       </div>
 

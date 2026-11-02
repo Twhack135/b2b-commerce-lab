@@ -4,10 +4,13 @@ The customer-facing shop of the B2B Commerce Lab (development preview).
 Next.js (App Router), React, TypeScript and Tailwind CSS, like the
 backoffice. Architecture and security rules: `docs/adr/` in the repository.
 
-Current state (Sprint 12B): shop frame, start page, technical health check,
+Current state (Sprint 12C): shop frame, start page, technical health check,
 and the sign-in: activation with a one-time link (`/activate`), sign-in
-(`/login`), the signed-in state (`/account`) and sign-out. There is no
-self-registration, no catalog, no prices and no ordering yet.
+(`/login`), the account (`/account`) with the authorized B2B units and
+the choice of the unit to work for, and sign-out. The chosen unit is
+remembered in a cookie and checked by the ERP on every request
+(docs/adr/0007). There is no self-registration, no catalog, no prices and
+no ordering yet.
 
 ## Getting started
 

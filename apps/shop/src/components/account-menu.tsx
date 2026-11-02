@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { signedInSession } from "@/lib/server/session";
 
-/** Header: "Sign in", or the signed-in person with "Sign out" */
+/** Header: "Sign in", or the signed-in person, the unit they work for and "Sign out" */
 export async function AccountMenu() {
   const session = await signedInSession();
   if (!session) {
@@ -19,7 +19,11 @@ export async function AccountMenu() {
     <div data-account-menu className="flex items-center gap-2">
       <Link href="/account" className="hidden text-right leading-tight sm:block">
         <span className="block font-medium">{session.user.displayName}</span>
-        <span className="block text-xs text-ink-muted">{session.user.account.name}</span>
+        <span className="block text-xs text-ink-muted" data-header-unit>
+          {session.selectedUnit
+            ? `${session.selectedUnit.name}${session.selectedUnit.canOrder ? "" : " · view only"}`
+            : session.user.account.name}
+        </span>
       </Link>
       <span
         aria-hidden="true"

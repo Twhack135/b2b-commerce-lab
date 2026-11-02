@@ -31,12 +31,22 @@ computer, but it is **not** sufficient for a customer-facing shop.
 - Browser tests run in an isolated environment; the development ports
   3000, 3001, 3002 and 5432 are never used by tests.
 
+## The Backoffice is not safe for remote deployment
+
+The Backoffice manages shop users and issues activation links since
+Sprint 12C, still **without administrator authentication**. It may only
+run on this computer. Sprint 12C adds protection against foreign web pages
+in the local browser (Host check against DNS rebinding, Origin check
+against CSRF, no framing; docs/adr/0007). These checks are no substitute
+for a sign-in: anyone who can reach port 3001 or 3000 can administer.
+
 ## Required before the shop may leave local development
 
 1. User sessions and unit authorization (ADR 0003, 0004) with the
    authorization test matrix.
-2. Authentication for the Backoffice and the admin API, or a network that
-   makes them unreachable from outside.
+2. Authentication and authorization for the Backoffice and the admin API
+   (including the shop user administration), or a network that makes them
+   unreachable from outside.
 3. HTTPS with HSTS, secure cookies, a nonce-based Content Security Policy.
 4. Durable, shared rate limiting of sign-in, activation and price queries
    (the sign-in limits of Sprint 12B live in the memory of one ERP process

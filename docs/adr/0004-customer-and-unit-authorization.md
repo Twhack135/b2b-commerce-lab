@@ -1,6 +1,7 @@
 # ADR 0004: Customer and B2B unit authorization
 
-Status: accepted, not implemented (planned after Sprint 11)
+Status: accepted; data model (12A), session checks (12B), administration
+and unit selection (12C, docs/adr/0007)
 
 ## Business scenario
 
@@ -27,7 +28,17 @@ customer, or a B2B customer of a B2B unit in SAP Commerce.)
 - Tests: an authorization matrix where user A must never reach units or
   orders of user B (lists, details, simulation, creation).
 
-## Current state (Sprint 11)
+## Current state (Sprint 12C)
+
+Shop users, their unit assignments (12A) and sessions (12B) exist. The
+Backoffice assigns units of the user's own account only (also enforced by
+the database). `GET /shop/v1/account` returns the units authorized for
+the session on every request and accepts the shop's remembered unit only
+if it is one of them; inactive units are view only. Catalog, prices and
+orders of the shop, and with them the full authorization matrix for
+lists, details, simulation and creation, follow in later sprints.
+
+## State in Sprint 11
 
 No authorization tables, no users. The existing data model already derives
 partners and sales area from the unit and checks Ship-tos against the
