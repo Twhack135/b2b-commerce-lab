@@ -111,6 +111,11 @@ ERP API integration and E2E tests use their own ports (55433, 55435).
 - `suites/sales-orders.mjs` – Sprint 10C: create and confirm sales orders
 - `suites/sales-order-overview.mjs` – Sprint 10D-B: the sales order overview
   (an empty part runs first, the main part later; see `SUITES` in `run.mjs`)
+- `suites/shop-auth.mjs` – Sprint 12B: activation, sign-in, session cookie,
+  CSRF checks, rate limit, sign-out, disabled user, secrets in logs. Test
+  users are created in the test database with the ERP's `shop:user` tool;
+  its output (activation links) is never printed, and diagnostics never
+  show URL fragments
 - `suites/shop-foundation.mjs` – Sprint 11: shop frame, security headers,
   health checks, the shop/ERP boundary, the service key and the refused
   non-local binding of the ERP API (runs last)

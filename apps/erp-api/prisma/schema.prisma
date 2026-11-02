@@ -613,6 +613,11 @@ model ShopUser {
 
   units ShopUserUnit[]
 
+  // Sign-in (Sprint 12B): the password, activation tokens and sessions
+  credential       ShopUserCredential?
+  activationTokens ShopActivationToken[]
+  sessions         ShopSession[]
+
   // Target of the foreign key that keeps unit assignments in the user's account
   @@unique([id, accountCustomerNumber], map: "shop_users_id_account_key")
   @@index([accountCustomerNumber], map: "shop_users_account_idx")
@@ -634,4 +639,59 @@ model ShopUserUnit {
   @@id([userId, unitId])
   @@index([unitId, accountCustomerNumber], map: "shop_user_units_unit_idx")
   @@map("shop_user_units")
+}
+
+// ---------------------------------------------------------------------------
+// Shop sign-in (Sprint 12B, docs/adr/0003): password, one-time activation
+// tokens and server-side sessions. Tokens are stored only as SHA-256 hashes;
+// the raw values exist only in the activation link and the session cookie.
+// ---------------------------------------------------------------------------
+
+/// The password of a shop user as an Argon2id hash (PHC string). A separate
+/// table: user records are read in many places, the hash only at sign-in.
+/// A user without a row has not been activated yet.
+model ShopUserCredential {
+  userId       String   @id @map("user_id") @db.Uuid
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user ShopUser @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "shop_user_credentials_user_fkey")
+
+  @@map("shop_user_credentials")
+}
+
+/// A one-time activation link: the user sets the first password with it.
+/// Expires after a short time; used_at is set when it is redeemed.
+model ShopActivationToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+
+  user ShopUser @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "shop_activation_tokens_user_fkey")
+
+  // At most one open (unused) token per user: a new one replaces the old one
+  @@unique([userId], where: raw("used_at IS NULL"), map: "shop_activation_tokens_one_open_key")
+  @@index([userId], map: "shop_activation_tokens_user_idx")
+  @@map("shop_activation_tokens")
+}
+
+/// A signed-in browser of a shop user. Valid until revoked (sign-out), the
+/// absolute expiry, or an idle period without requests.
+model ShopSession {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime  @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  user ShopUser @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "shop_sessions_user_fkey")
+
+  @@index([userId], map: "shop_sessions_user_idx")
+  @@map("shop_sessions")
 }

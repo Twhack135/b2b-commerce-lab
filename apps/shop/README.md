@@ -4,8 +4,10 @@ The customer-facing shop of the B2B Commerce Lab (development preview).
 Next.js (App Router), React, TypeScript and Tailwind CSS, like the
 backoffice. Architecture and security rules: `docs/adr/` in the repository.
 
-Current state (Sprint 11): shop frame, start page and a technical health
-check. There is no sign-in, no catalog, no prices and no ordering yet.
+Current state (Sprint 12B): shop frame, start page, technical health check,
+and the sign-in: activation with a one-time link (`/activate`), sign-in
+(`/login`), the signed-in state (`/account`) and sign-out. There is no
+self-registration, no catalog, no prices and no ordering yet.
 
 ## Getting started
 
@@ -28,8 +30,11 @@ on 127.0.0.1 and must not be exposed to a network (docs/adr/0006).
 - The shop server calls only the ERP shop API `/shop/v1`, never the admin
   endpoints, with the header `X-Shop-Service-Key`.
 - The service key identifies the shop server, not a user. It does not
-  authorize any customer data; that needs a user session and an
-  authorization per B2B unit (later sprints).
+  authorize any customer data: customer calls also carry the user's session
+  token, which the shop keeps in an HttpOnly cookie and sends to the ERP in
+  `X-Shop-Session` (docs/adr/0003).
+- The sign-in route handlers (`/api/auth/login|logout|activate`) accept
+  POST requests from pages of this shop only (Origin check against CSRF).
 - Without a valid configuration the shop fails closed: `GET /api/health`
   answers 503 and the reason is only written to the server log.
 

@@ -94,7 +94,7 @@ describe("assertTestContainerName", () => {
 describe("serviceEnvironment", () => {
   it("removes everything that could redirect a service and sets the test values", () => {
     const env = serviceEnvironment(
-      { PATH: "x", DATABASE_URL: "postgresql://dev", PGHOST: "db", PGPORT: "5432", ERP_API_URL: "http://127.0.0.1:3000", SHOP_SERVICE_KEY: "dev-key", PORT: "3000", HOST: "0.0.0.0" },
+      { PATH: "x", DATABASE_URL: "postgresql://dev", PGHOST: "db", PGPORT: "5432", ERP_API_URL: "http://127.0.0.1:3000", SHOP_SERVICE_KEY: "dev-key", SHOP_TRUSTED_PROXY_HOPS: "1", PORT: "3000", HOST: "0.0.0.0" },
       { DATABASE_URL: "postgresql://test", PORT: "3300", HOST: "127.0.0.1" },
     );
     assert.deepEqual(env, { PATH: "x", DATABASE_URL: "postgresql://test", PORT: "3300", HOST: "127.0.0.1" });

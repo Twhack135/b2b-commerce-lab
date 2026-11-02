@@ -92,7 +92,8 @@ export class ShopUsersService {
 
   /**
    * Disables or enables a user. A disabled user keeps the unit assignments
-   * but is authorized for nothing until enabled again.
+   * but is authorized for nothing until enabled again. Disabling also ends
+   * all sessions of the user for good (database trigger, Sprint 12B).
    */
   async setStatus(userId: string, status: ShopUserStatus): Promise<ShopUser> {
     if (!isUuid(userId)) throw new ShopUserRuleError('USER_NOT_FOUND');

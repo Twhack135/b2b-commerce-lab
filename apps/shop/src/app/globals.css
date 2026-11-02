@@ -15,6 +15,10 @@
   --color-brand: #0b6bcb; /* primary actions, links */
   --color-brand-strong: #0957a6;
   --color-brand-soft: #e7f1fb;
+  --color-danger: #c62828;
+  --color-danger-soft: #fdecec;
+  --color-success: #1e7d45;
+  --color-success-soft: #e8f5ed;
   --color-warning: #8a5300;
   --color-warning-soft: #fff4dc;
 }

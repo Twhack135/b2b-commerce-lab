@@ -64,7 +64,7 @@ export async function resetDatabase(prisma: PrismaService) {
     throw new Error(`Refusing to delete data in database ${name}`);
   }
   await prisma.$executeRawUnsafe(
-    'TRUNCATE shop_user_units, shop_users, sales_order_item_conditions, sales_order_items, sales_order_partners, sales_orders, price_conditions, b2b_unit_ship_tos, b2b_units, customer_sales_areas, customer_account_members, customers, materials RESTART IDENTITY',
+    'TRUNCATE shop_sessions, shop_activation_tokens, shop_user_credentials, shop_user_units, shop_users, sales_order_item_conditions, sales_order_items, sales_order_partners, sales_orders, price_conditions, b2b_unit_ship_tos, b2b_units, customer_sales_areas, customer_account_members, customers, materials RESTART IDENTITY',
   );
   // Sales order numbers start again at 1000000001
   await prisma.$executeRawUnsafe(
@@ -305,6 +305,9 @@ export async function tableFingerprint(prisma: PrismaService) {
     'sales_order_item_conditions',
     'shop_users',
     'shop_user_units',
+    'shop_user_credentials',
+    'shop_activation_tokens',
+    'shop_sessions',
   ];
   const result: Record<string, string> = {};
   for (const table of tables) {

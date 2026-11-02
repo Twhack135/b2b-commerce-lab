@@ -1,14 +1,22 @@
 // The frame of every shop page: header with navigation, content, footer.
-// Areas that do not exist yet are shown as "Soon" and are not links; there
-// is deliberately no sign-in, so nothing looks like working access control.
+// Areas that do not exist yet are shown as "Soon" and are not links. The
+// sign-in state comes from the ERP on every request (AccountMenu).
 
 import Link from "next/link";
+import { Suspense } from "react";
+import { AccountMenu } from "./account-menu";
 
 const NAV_ITEMS = ["Catalog", "Quick Order", "My Orders", "Account"];
 
 export function ShopShell({ children }: { children: React.ReactNode }) {
   return (
     <div data-shop-shell className="flex min-h-screen flex-col">
+      <p
+        data-preview-badge
+        className="bg-warning-soft px-4 py-1 text-center text-xs font-medium text-warning"
+      >
+        Development preview · runs on this computer only
+      </p>
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
           <Link href="/" className="flex items-center gap-3">
@@ -21,12 +29,12 @@ export function ShopShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
 
-          <span
-            data-preview-badge
-            className="ml-auto rounded-full bg-warning-soft px-2.5 py-0.5 text-xs font-medium text-warning sm:order-last"
-          >
-            Development preview
-          </span>
+          <div className="ml-auto flex items-center gap-3 sm:order-last">
+            {/* The sign-in state is only known at request time (cookie) */}
+            <Suspense fallback={<span className="h-9 w-20" aria-hidden="true" />}>
+              <AccountMenu />
+            </Suspense>
+          </div>
 
           <nav aria-label="Shop" className="w-full sm:w-auto">
             <ul className="flex flex-wrap gap-1">

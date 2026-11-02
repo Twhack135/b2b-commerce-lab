@@ -18,6 +18,14 @@ files without values are committed.
 `HOST` and `PORT` of the ERP API are optional; `HOST` must be `127.0.0.1`,
 `::1` or `localhost`.
 
+`SHOP_TRUSTED_PROXY_HOPS` (shop, optional) stays unset for local
+development: the shop then trusts no `X-Forwarded-For` header. Set it only
+behind reverse proxies that append to that header (number of proxies).
+
+**Node.js:** 24.7 or later is required by the ERP API (built-in Argon2id
+for shop passwords; it refuses to start otherwise). The lab is tested with
+Node.js 26.13 for all apps and the browser test runner.
+
 Both shop variables are read by server code only and have no
 `NEXT_PUBLIC_` prefix, so Next.js never sends them to the browser. The
 service key identifies the shop server, not a user: it authorizes no
@@ -44,6 +52,32 @@ customer data (docs/adr/0002).
    the shop.
 4. Before committing, `git status` must not list any `.env` or `.env.local`
    file.
+
+## Shop users for local testing
+
+There is no self-registration. Until the Backoffice manages shop users
+(Sprint 12C), a local command-line tool creates them and issues the
+one-time activation link (after `npm run build` in `apps/erp-api`):
+
+```bash
+cd apps/erp-api
+npm run shop:user -- create --account CUST-1000 --email anna@example.com --name "Anna Weber" --unit UNIT-STUTTGART
+npm run shop:user -- activation --email anna@example.com
+```
+
+The database needs the sign-in migration
+`20261103090000_add_shop_authentication` first (apply it only with a backup,
+like the runbook in `docs/runbooks/` describes for the previous migration).
+
+The link is printed once (`http://127.0.0.1:3002/activate#token=...`),
+works once and for 24 hours. Treat it like a password. The tool writes
+into the database of the root `.env` and refuses databases that are not on
+this computer.
+
+Sign-in: `http://127.0.0.1:3002/login`. The session cookie is HttpOnly and
+SameSite=Lax; on plain-HTTP localhost it is called `shop_session` (without
+the `__Host-` prefix, which needs HTTPS). Sessions end after 30 minutes
+without activity and at the latest after 10 hours.
 
 ## Startup behavior
 

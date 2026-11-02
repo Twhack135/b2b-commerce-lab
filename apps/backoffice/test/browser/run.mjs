@@ -13,6 +13,7 @@
 //
 // Usage: npm run test:browser [-- --skip-build] [--keep]
 
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +31,7 @@ import {
 } from "./lib/safety.mjs";
 import salesOrderOverviewSuite, { emptyOverviewSuite } from "./suites/sales-order-overview.mjs";
 import salesOrderSuite from "./suites/sales-orders.mjs";
+import shopAuthSuite from "./suites/shop-auth.mjs";
 import shopFoundationSuite from "./suites/shop-foundation.mjs";
 
 // In this order: the empty overview needs a database without orders
@@ -38,6 +40,7 @@ const SUITES = [
   ["Sales orders (Sprint 10C)", salesOrderSuite],
   ["Sales order overview (Sprint 10D-B)", salesOrderOverviewSuite],
   ["Shop foundation (Sprint 11)", shopFoundationSuite],
+  ["Shop sign-in (Sprint 12B)", shopAuthSuite],
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -215,6 +218,19 @@ async function main() {
     fixtures,
     shopServiceKey,
     startErpApi,
+    /**
+     * The ERP's local shop user tool against the test database. Its output
+     * (e.g. an activation link) is returned, never printed.
+     */
+    shopUser: (...args) => {
+      const result = spawnSync(process.execPath, [join(ERP_API, "dist/shop/cli/shop-user.cli.js"), ...args, "--shop-url", shopUrl, "--json"], {
+        cwd: ERP_API,
+        env: serviceEnvironment(process.env, { DATABASE_URL: database.url }),
+        encoding: "utf8",
+      });
+      if (result.status !== 0) throw new Error(`shop:user ${args[0]} failed (exit ${result.status})`);
+      return JSON.parse(result.stdout.trim().split(/\r?\n/).pop());
+    },
     // Folder of the service logs, e.g. to prove that no secret is logged
     runDir,
     check: (name, ok, detail = "") => {

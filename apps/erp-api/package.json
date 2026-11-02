@@ -5,6 +5,9 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.7.0"
+  },
   "scripts": {
     "build": "nest build",
     "deploy": "nest deploy",
@@ -13,6 +16,7 @@
     "start:dev": "nest start --watch --env-file ../../.env",
     "start:debug": "nest start --debug --watch --env-file ../../.env",
     "start:prod": "node dist/main",
+    "shop:user": "node --env-file=../../.env dist/shop/cli/shop-user.cli.js",
     "lint": "oxlint --type-aware src/ test/",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",

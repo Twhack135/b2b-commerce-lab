@@ -184,7 +184,8 @@ export class Page {
     if (await this.#poll(condition, timeoutMs)) return;
     await this.screenshot("timeout.png").catch(() => {});
     const state = await this.evaluate(`JSON.stringify({
-      url: location.href,
+      // Without the fragment: it can hold secrets such as an activation token
+      url: location.origin + location.pathname + location.search,
       alerts: [...document.querySelectorAll('[role=alert],[role=status]')].map(e => e.textContent.trim()).filter(Boolean),
       ${this.diagnostics ? `page: ${this.diagnostics},` : ""}
     })`).catch((error) => `page state unavailable: ${error.message}`);
@@ -235,9 +236,11 @@ export class Page {
   /** Full page load of `url`; waits for `readyExpression` */
   async goto(url, readyExpression) {
     await this.send("Page.navigate", { url });
-    await this.waitFor("document.readyState === 'complete'", `load ${url}`);
+    // Labels without the fragment of the URL (see waitFor)
+    const shown = url.split("#")[0];
+    await this.waitFor("document.readyState === 'complete'", `load ${shown}`);
     await this.installHelpers();
-    await this.waitFor(readyExpression, `page ${url}`);
+    await this.waitFor(readyExpression, `page ${shown}`);
   }
 
   async viewport(width, height, mobile = false) {

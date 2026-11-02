@@ -38,7 +38,10 @@ computer, but it is **not** sufficient for a customer-facing shop.
 2. Authentication for the Backoffice and the admin API, or a network that
    makes them unreachable from outside.
 3. HTTPS with HSTS, secure cookies, a nonce-based Content Security Policy.
-4. Rate limiting of login and price queries; an audit log for logins,
-   orders and authorization changes.
+4. Durable, shared rate limiting of sign-in, activation and price queries
+   (the sign-in limits of Sprint 12B live in the memory of one ERP process
+   and are development only), a trusted reverse proxy that sets the client
+   address (`SHOP_TRUSTED_PROXY_HOPS`), and an audit log for logins, orders
+   and authorization changes.
 5. Secret management for the service key and its rotation.
 6. A security review of the deployment.
