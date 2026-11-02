@@ -17,12 +17,21 @@ import { readOnlyTransaction } from '../prisma/read-only-transaction';
 import { PrismaService } from '../prisma/prisma.service';
 import { salesAreaKeyOf } from '../sales-areas/sales-area-key';
 import { CreateSalesOrderDto } from './dto/create-sales-order.dto';
+import { ListSalesOrdersQueryDto } from './dto/list-sales-orders.dto';
 import { SimulateSalesOrderDto } from './dto/simulate-sales-order.dto';
 import { evaluateOrder, OrderEvaluation } from './order-evaluation';
 import { lockOrderData } from './order-locks';
 import { priceChangeMessages, priceChanges } from './price-confirmation';
 import { hashOrderRequest } from './request-hash';
-import { SalesOrder } from './sales-order.interface';
+import { SalesOrder, SalesOrderList } from './sales-order.interface';
+import {
+  LIST_ORDER_BY,
+  listLimit,
+  listWhere,
+  pageWhere,
+  SUMMARY_SELECT,
+  toSalesOrderList,
+} from './sales-order-list';
 import {
   ORDER_INCLUDE,
   SalesOrderRecord,
@@ -117,6 +126,31 @@ export class SalesOrdersService {
       throw error;
     }
     return { order: await this.findOne(salesOrderNumber), created: true };
+  }
+
+  /**
+   * One page of the order list (see sales-order-list.ts). The count and the
+   * page are read in one read-only REPEATABLE READ transaction, so `total`
+   * and the rows belong to the same snapshot even while orders are created;
+   * the transaction takes no locks and never blocks order creation.
+   */
+  async list(query: ListSalesOrdersQueryDto): Promise<SalesOrderList> {
+    const limit = listLimit(query);
+    // One after the other: a transaction uses a single connection
+    const { total, rows } = await readOnlyTransaction(
+      this.prisma,
+      async (tx) => {
+        const total = await tx.salesOrder.count({ where: listWhere(query) });
+        const rows = await tx.salesOrder.findMany({
+          where: pageWhere(query),
+          orderBy: LIST_ORDER_BY,
+          take: limit + 1,
+          select: SUMMARY_SELECT,
+        });
+        return { total, rows };
+      },
+    );
+    return toSalesOrderList(rows, limit, total);
   }
 
   /** A stored sales order, exactly as it was created */

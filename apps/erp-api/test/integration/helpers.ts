@@ -316,3 +316,87 @@ export async function tableFingerprint(prisma: PrismaService) {
   }
   return result;
 }
+
+/**
+ * A customer of another market that is its own account, with one unit
+ * (Sold-to, Bill-to, Payer and only Ship-to = the customer)
+ */
+async function createMarketCustomer(
+  prisma: PrismaService,
+  salesArea: typeof GERMANY,
+  customer: {
+    customerNumber: string;
+    name: string;
+    street: string;
+    postalCode: string;
+    city: string;
+    country: string;
+  },
+  unit: { unitId: string; name: string },
+) {
+  const { customerNumber } = customer;
+  await prisma.customer.create({ data: customer });
+  await prisma.customerSalesArea.create({
+    data: { customerNumber, ...salesArea },
+  });
+  await prisma.customerAccountMember.create({
+    data: membership(customerNumber, customerNumber),
+  });
+  await prisma.b2bUnit.create({
+    data: {
+      ...unit,
+      accountCustomerNumber: customerNumber,
+      soldToCustomerNumber: customerNumber,
+      billToCustomerNumber: customerNumber,
+      payerCustomerNumber: customerNumber,
+      ...salesArea,
+    },
+  });
+  await prisma.b2bUnitShipTo.create({
+    data: {
+      unitId: unit.unitId,
+      customerNumber,
+      accountCustomerNumber: customerNumber,
+      isDefault: true,
+      ...salesArea,
+    },
+  });
+}
+
+/** A Japanese customer with unit UNIT-OSAKA and a JPY list price of MAT-001 */
+export async function createJapanData(prisma: PrismaService) {
+  await createMarketCustomer(
+    prisma,
+    JAPAN,
+    {
+      customerNumber: 'JP-1000',
+      name: 'Osaka Heating KK',
+      street: '1-1 Umeda',
+      postalCode: '530-0001',
+      city: 'Osaka',
+      country: 'JP',
+    },
+    { unitId: 'UNIT-OSAKA', name: 'Osaka' },
+  );
+  await createListPrices(prisma, JAPAN, 'JPY', [['MAT-001', '700000']], 9100);
+}
+
+/**
+ * A Polish customer with unit UNIT-WARSZAWA. Use with createMuellerData,
+ * which creates the PLN list price of MAT-PL (99.00).
+ */
+export async function createPolandData(prisma: PrismaService) {
+  await createMarketCustomer(
+    prisma,
+    POLAND,
+    {
+      customerNumber: 'PL-1000',
+      name: 'Warszawa Ogrzewanie Sp. z o.o.',
+      street: 'ul. Prosta 1',
+      postalCode: '00-838',
+      city: 'Warszawa',
+      country: 'PL',
+    },
+    { unitId: 'UNIT-WARSZAWA', name: 'Warszawa' },
+  );
+}

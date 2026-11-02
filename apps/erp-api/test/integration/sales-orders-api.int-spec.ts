@@ -3,12 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '../../src/generated/prisma/client';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import {
-  createListPrices,
+  createJapanData,
   createMuellerData,
   createTestApp,
   GERMANY,
   JAPAN,
-  membership,
   resetDatabase,
   tableFingerprint,
   TestClock,
@@ -999,7 +998,6 @@ describe('Sales orders API', () => {
       ).toBe('Sales order 12345 not found');
       // As before this route existed
       await http().get('/sales-orders/simulate').expect(404);
-      await http().get('/sales-orders').expect(404);
     });
   });
 
@@ -1203,44 +1201,3 @@ describe('Sales orders API', () => {
     });
   });
 });
-
-/** A Japanese customer with unit UNIT-OSAKA and a JPY list price of MAT-001 */
-async function createJapanData(prisma: PrismaService) {
-  await prisma.customer.create({
-    data: {
-      customerNumber: 'JP-1000',
-      name: 'Osaka Heating KK',
-      street: '1-1 Umeda',
-      postalCode: '530-0001',
-      city: 'Osaka',
-      country: 'JP',
-    },
-  });
-  await prisma.customerSalesArea.create({
-    data: { customerNumber: 'JP-1000', ...JAPAN },
-  });
-  await prisma.customerAccountMember.create({
-    data: membership('JP-1000', 'JP-1000'),
-  });
-  await prisma.b2bUnit.create({
-    data: {
-      unitId: 'UNIT-OSAKA',
-      name: 'Osaka',
-      accountCustomerNumber: 'JP-1000',
-      soldToCustomerNumber: 'JP-1000',
-      billToCustomerNumber: 'JP-1000',
-      payerCustomerNumber: 'JP-1000',
-      ...JAPAN,
-    },
-  });
-  await prisma.b2bUnitShipTo.create({
-    data: {
-      unitId: 'UNIT-OSAKA',
-      customerNumber: 'JP-1000',
-      accountCustomerNumber: 'JP-1000',
-      isDefault: true,
-      ...JAPAN,
-    },
-  });
-  await createListPrices(prisma, JAPAN, 'JPY', [['MAT-001', '700000']], 9100);
-}

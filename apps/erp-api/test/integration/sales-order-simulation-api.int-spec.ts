@@ -621,7 +621,6 @@ describe('Sales order simulation API', () => {
 
     it('only accepts POST', async () => {
       await http().get('/sales-orders/simulate').expect(404);
-      await http().get('/sales-orders').expect(404);
     });
   });
 

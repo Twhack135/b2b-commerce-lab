@@ -83,3 +83,38 @@ export interface SalesOrder {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * A stored sales order in the order list (GET /sales-orders): header data
+ * and the Sold-to only, all from the order's own snapshots
+ */
+export interface SalesOrderSummary {
+  salesOrderNumber: string;
+  orderDate: string;
+  /** ISO 8601 timestamp */
+  createdAt: string;
+  status: SalesOrderStatus;
+  deliveryBlock: SalesOrderDeliveryBlock | null;
+  salesArea: SalesAreaKey;
+  soldTo: { customerNumber: string; name: string };
+  unit: { unitId: string; name: string };
+  customerReference: string | null;
+  itemCount: number;
+  /** Net value excluding tax and freight, in the document currency */
+  netValue: string;
+  currency: string;
+  currencyDecimals: number;
+}
+
+/**
+ * One page of the order list, newest sales order number first. `total`
+ * counts all orders matching the search and filters (not only this page);
+ * `nextCursor` is the `after` value of the next page, null on the last page.
+ */
+export interface SalesOrderList {
+  items: SalesOrderSummary[];
+  total: number;
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+}

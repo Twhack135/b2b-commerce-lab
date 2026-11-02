@@ -6,12 +6,14 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { CreateSalesOrderDto } from './dto/create-sales-order.dto';
+import { ListSalesOrdersQueryDto } from './dto/list-sales-orders.dto';
 import { SimulateSalesOrderDto } from './dto/simulate-sales-order.dto';
-import { SalesOrder } from './sales-order.interface';
+import { SalesOrder, SalesOrderList } from './sales-order.interface';
 import { SalesOrderSimulation } from './sales-order-simulation.interface';
 import { SalesOrdersService } from './sales-orders.service';
 
@@ -42,6 +44,14 @@ export class SalesOrdersController {
     response.status(created ? 201 : 200);
     response.location(`/sales-orders/${order.salesOrderNumber}`);
     return order;
+  }
+
+  // The order list: read-only, newest sales order number first, 25 per page
+  // by default (see ListSalesOrdersQueryDto and sales-order-list.ts).
+  // 400 for unknown or invalid parameters.
+  @Get()
+  list(@Query() query: ListSalesOrdersQueryDto): Promise<SalesOrderList> {
+    return this.salesOrdersService.list(query);
   }
 
   // Anything but a 10-digit number cannot be a sales order: 404, as before
