@@ -171,8 +171,18 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 1. In the **normal** window, open Anna's link.
 2. Expected: the page "Activate your access"; the address bar shows only
    `http://127.0.0.1:3313/activate` (the token was removed).
-3. Enter Anna's password twice, click **Set password**.
-4. Expected: "Your password is set" with a link to sign in.
+3. Before typing, **Set password** is greyed out and the text below it
+   says "Enter at least 15 characters (0 so far)." The mouse pointer over
+   the button is a "not allowed" sign, not a waiting cursor.
+4. Press **F5** (reload). Expected: "Please open the link from your
+   invitation again" (not "expired"): the page removed the code from the
+   address bar, so a reload cannot continue. The link is still valid.
+5. Paste Anna's link into the address bar of **the same tab** and press
+   Enter. Expected: the form appears again and the address bar shows only
+   `/activate`.
+6. Enter Anna's password twice (the hint below the button disappears),
+   click **Set password**.
+7. Expected: "Your password is set" with a link to sign in.
 
 **B4 – Links work only once**
 1. Open Anna's link again (paste it into the address bar) and try to set a
@@ -437,5 +447,7 @@ Remove **only** containers whose name starts with `b2b-browser-test-`:
 | "port … is already in use" | Another program, or an earlier acceptance run, uses the port. Stop that program yourself; the command never stops anything it did not start. |
 | "Docker is not available" | Start Docker Desktop and wait until it says "running". |
 | The shop says "Sign-in is not available" | The ERP API in the terminal has stopped. Look at the terminal; restart the environment. |
+| After a reload the activation page says "Please open the link from your invitation again" | Expected: the code is removed from the address bar once read. Open the link again (also in the same tab); it still works until a password is set. |
+| **Set password** stays greyed out | The text below the button says what is missing: at least 15 characters, the repetition, or matching passwords. |
 | A link says "invalid or has expired" at the first use | A newer link was created for the same user, or 24 hours have passed. Create a new link in the Backoffice. |
 | "Too many attempts" | Five wrong passwords for one address within 15 minutes. Wait 15 minutes or restart the environment. |

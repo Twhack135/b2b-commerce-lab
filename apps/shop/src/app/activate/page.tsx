@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ActivationForm } from "@/components/activation-form";
+import { ActivationFormLoader } from "@/components/activation-form-loader";
 import { AuthPanel } from "@/components/auth-panel";
 
 export const metadata: Metadata = {
@@ -15,7 +15,7 @@ export default function ActivatePage() {
       title="Activate your access"
       intro="Choose the password for your shop access. The link from your invitation works once."
     >
-      <ActivationForm />
+      <ActivationFormLoader />
     </AuthPanel>
   );
 }

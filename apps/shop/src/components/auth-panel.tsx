@@ -49,7 +49,7 @@ export const inputClass =
   "w-full rounded-lg border border-line bg-surface px-3.5 py-2.5 text-base outline-none transition-shadow placeholder:text-ink-muted/60 focus:border-brand focus:ring-4 focus:ring-brand/15 aria-invalid:border-danger";
 
 export const primaryButtonClass =
-  "inline-flex w-full items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-base font-medium text-white shadow-sm transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-wait disabled:opacity-70";
+  "inline-flex w-full items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-base font-medium text-white shadow-sm transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60 aria-busy:cursor-wait";
 
 export function Notice({
   kind,

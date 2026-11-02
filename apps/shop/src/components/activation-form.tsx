@@ -1,23 +1,64 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
+import { parseActivationFragment, submitBlocker, MIN_PASSWORD_LENGTH, type LinkFragment } from "@/lib/activation-link";
 import { inputClass, Notice, primaryButtonClass } from "./auth-panel";
-
-const MIN_LENGTH = 15;
 
 // The token is in the fragment of the activation link (#token=...): a
 // fragment is never sent to a server and never appears in a Referer header.
-// It is read once and then removed from the address bar and the history.
-let captured: string | null | undefined;
-function tokenFromLink(): string | null {
-  if (captured === undefined) {
-    const match = /^#token=([A-Za-z0-9_-]{43})$/.exec(window.location.hash);
-    captured = match ? match[1] : null;
+// The page reads it and removes it from the address bar and the history at
+// once; it is kept only in the state of this component, never stored.
+//
+// Rendered in the browser only (activation-form-loader.tsx): the fragment
+// does not exist on the server.
+
+/** Choose the first password with the one-time activation link */
+export function ActivationForm() {
+  const [link, setLink] = useState<LinkFragment>(() => parseActivationFragment(window.location.hash));
+
+  // Every link that reaches the address bar is removed from it at once
+  useEffect(() => {
+    if (window.location.hash) {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+    }
+  }, [link]);
+
+  // Opening the link again in this tab only changes the fragment: the page
+  // is not reloaded, so the new link is read here
+  useEffect(() => {
+    function onHashChange() {
+      if (window.location.hash) setLink(parseActivationFragment(window.location.hash));
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  if (link.kind === "missing") {
+    return (
+      <div data-activation="missing">
+        <Notice kind="info">
+          <p className="font-medium">Please open the link from your invitation again.</p>
+          <p className="mt-1">
+            For your security, this page removes the code from the address bar as soon as it has read it, so
+            reloading the page cannot continue. Your link still works if you have not set a password with it yet.
+          </p>
+        </Notice>
+      </div>
+    );
   }
-  return captured;
+  if (link.kind === "malformed") {
+    return (
+      <div data-activation="incomplete">
+        <Notice kind="error">
+          This activation link is incomplete. Please copy the complete link from your invitation and open it again.
+        </Notice>
+      </div>
+    );
+  }
+  // A new link starts with an empty form
+  return <PasswordForm key={link.token} token={link.token} />;
 }
-const noSubscription = () => () => {};
 
 type Status =
   | { kind: "idle" }
@@ -25,21 +66,12 @@ type Status =
   | { kind: "activated" }
   | { kind: "error"; messages: string[]; linkInvalid?: boolean };
 
-/** Choose the first password with the one-time activation link */
-export function ActivationForm() {
-  const token = useSyncExternalStore(noSubscription, tokenFromLink, () => undefined);
+function PasswordForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [visible, setVisible] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
-  useEffect(() => {
-    if (window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-  }, []);
-
-  if (token === undefined) return <div className="h-72" aria-busy="true" />;
   if (status.kind === "activated") {
     return (
       <div className="space-y-5" data-activation="done">
@@ -50,7 +82,7 @@ export function ActivationForm() {
       </div>
     );
   }
-  if (token === null || (status.kind === "error" && status.linkInvalid)) {
+  if (status.kind === "error" && status.linkInvalid) {
     return (
       <div data-activation="invalid">
         <Notice kind="error">
@@ -61,12 +93,14 @@ export function ActivationForm() {
     );
   }
 
-  const tooShort = Array.from(password.normalize("NFKC")).length < MIN_LENGTH;
+  const tooShort = Array.from(password.normalize("NFKC")).length < MIN_PASSWORD_LENGTH;
   const mismatch = confirmation !== "" && confirmation !== password;
+  const blocker = submitBlocker(password, confirmation);
+  const isSubmitting = status.kind === "submitting";
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (tooShort || confirmation !== password) return;
+    if (blocker || isSubmitting) return;
     setStatus({ kind: "submitting" });
     const response = await fetch("/api/auth/activate", {
       method: "POST",
@@ -124,7 +158,7 @@ export function ActivationForm() {
           className={inputClass}
         />
         <p id="password-rules" className="mt-1.5 text-sm text-ink-muted">
-          At least {MIN_LENGTH} characters. A sentence of several words is easy to remember and hard to
+          At least {MIN_PASSWORD_LENGTH} characters. A sentence of several words is easy to remember and hard to
           guess.
         </p>
       </div>
@@ -149,13 +183,21 @@ export function ActivationForm() {
           </p>
         )}
       </div>
-      <button
-        type="submit"
-        disabled={status.kind === "submitting" || tooShort || confirmation !== password}
-        className={primaryButtonClass}
-      >
-        {status.kind === "submitting" ? "Setting password…" : "Set password"}
-      </button>
+      <div>
+        <button
+          type="submit"
+          disabled={isSubmitting || blocker !== null}
+          aria-busy={isSubmitting || undefined}
+          aria-describedby={blocker && !mismatch ? "submit-hint" : undefined}
+          className={primaryButtonClass}
+        >
+          {isSubmitting ? "Setting password…" : "Set password"}
+        </button>
+        {/* Says why the button cannot be used yet (the mismatch is shown at its field) */}
+        <p id="submit-hint" data-submit-hint aria-live="polite" className="mt-2 min-h-5 text-sm text-ink-muted">
+          {blocker && !mismatch ? blocker : ""}
+        </p>
+      </div>
     </form>
   );
 }

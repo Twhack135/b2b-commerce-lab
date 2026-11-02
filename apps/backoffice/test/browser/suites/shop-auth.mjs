@@ -50,6 +50,21 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
   check("The token is removed from the address bar at once", (await evaluate("location.href")) === `${SHOP}/activate`);
   check("The token is never sent to a server in a URL", page.requests.length > 0 && page.requests.every((r) => !r.url.includes(token)));
 
+  // Found in the Sprint 12C acceptance test: the disabled button looked like
+  // "loading", a reload claimed the link had expired, and opening the link
+  // again in the same tab kept that state and the token in the address bar
+  const button = "document.querySelector('[data-activation-form] button[type=submit]')";
+  check("An empty form says what is missing; the disabled button does not look like loading", (await evaluate(`${button}.disabled && getComputedStyle(${button}).cursor !== 'wait'`)) && (await evaluate("$text('[data-submit-hint]')")) === "Enter at least 15 characters (0 so far).");
+  await page.send("Page.reload", {});
+  await page.waitFor("document.readyState === 'complete' && !!document.querySelector('[data-activation=missing]')?.offsetParent", "reload: link missing", 15_000);
+  await page.installHelpers();
+  check("Reloaded: asks to open the link again instead of claiming it expired; the link stays valid", (await evaluate("$text('[data-activation=missing]')")).includes("open the link from your invitation again") && !(await evaluate("document.body.innerText.includes('expired')")) && sql("SELECT count(*) FROM shop_activation_tokens WHERE used_at IS NULL") === "1");
+  page.requests = [];
+  await page.send("Page.navigate", { url: link });
+  await page.waitFor("!!document.querySelector('[data-activation-form]')?.offsetParent", "same tab: form", 15_000);
+  await page.installHelpers();
+  check("Opened again in the same tab: the form appears, the token leaves the address bar and no server", (await evaluate("location.href")) === `${SHOP}/activate` && page.requests.every((r) => !r.url.includes(token)));
+
   const submit = "document.querySelector('[data-activation-form] button[type=submit]')";
   await evaluate("$setEl(document.getElementById('new-password'), 'too short')");
   check("Too short: 'Set password' stays disabled, the rule is explained", (await evaluate(`${submit}.disabled`)) && (await evaluate("$text('#password-rules')")).includes("At least 15 characters"));
