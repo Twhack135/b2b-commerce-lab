@@ -4,8 +4,8 @@
 
 import net from "node:net";
 
-/** Ports of the real development environment (API, Backoffice, PostgreSQL) */
-export const PROTECTED_PORTS = Object.freeze([3000, 3001, 5432]);
+/** Ports of the real development environment (API, Backoffice, Shop, PostgreSQL) */
+export const PROTECTED_PORTS = Object.freeze([3000, 3001, 3002, 5432]);
 
 /** Prefix of every container the runner creates; nothing else is touched */
 export const CONTAINER_PREFIX = "b2b-browser-test-";
@@ -92,15 +92,16 @@ export function assertTestContainerName(name) {
 
 /**
  * Environment of a test service: the parent environment without anything
- * that could redirect it, plus the given settings. PostgreSQL variables are
- * removed so that only the explicit DATABASE_URL counts.
+ * that could redirect it or give it a credential, plus the given settings.
+ * PostgreSQL variables are removed so that only the explicit DATABASE_URL
+ * counts; the shop service key of the run is set explicitly where needed.
  */
 export function serviceEnvironment(base, settings) {
   const env = { ...base };
   for (const name of Object.keys(env)) {
     if (/^PG[A-Z]+$/.test(name)) delete env[name];
   }
-  for (const name of ["DATABASE_URL", "ERP_API_URL", "PORT", "HOST", "HOSTNAME"]) {
+  for (const name of ["DATABASE_URL", "ERP_API_URL", "SHOP_SERVICE_KEY", "PORT", "HOST", "HOSTNAME"]) {
     delete env[name];
   }
   return { ...env, ...settings };

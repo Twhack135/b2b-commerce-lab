@@ -17,7 +17,7 @@ describe("assertTestPort", () => {
     assert.equal(assertTestPort(55450, "database"), 55450);
   });
 
-  for (const port of [3000, 3001, 5432]) {
+  for (const port of [3000, 3001, 3002, 5432]) {
     it(`never uses the development port ${port}`, () => {
       assert.throws(() => assertTestPort(port, "x"), /belongs to the development environment/);
     });
@@ -94,7 +94,7 @@ describe("assertTestContainerName", () => {
 describe("serviceEnvironment", () => {
   it("removes everything that could redirect a service and sets the test values", () => {
     const env = serviceEnvironment(
-      { PATH: "x", DATABASE_URL: "postgresql://dev", PGHOST: "db", PGPORT: "5432", ERP_API_URL: "http://127.0.0.1:3000", PORT: "3000", HOST: "0.0.0.0" },
+      { PATH: "x", DATABASE_URL: "postgresql://dev", PGHOST: "db", PGPORT: "5432", ERP_API_URL: "http://127.0.0.1:3000", SHOP_SERVICE_KEY: "dev-key", PORT: "3000", HOST: "0.0.0.0" },
       { DATABASE_URL: "postgresql://test", PORT: "3300", HOST: "127.0.0.1" },
     );
     assert.deepEqual(env, { PATH: "x", DATABASE_URL: "postgresql://test", PORT: "3300", HOST: "127.0.0.1" });

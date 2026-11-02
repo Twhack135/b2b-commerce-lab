@@ -4,10 +4,11 @@
 //   ERP API (apps/erp-api/dist)    127.0.0.1:BROWSER_TEST_API_PORT  (3300)
 //   Backoffice (next start)        127.0.0.1:BROWSER_TEST_BO_PORT   (3301)
 //   Backoffice without ERP API     127.0.0.1:BROWSER_TEST_DEAD_PORT (3302)
+//   Shop (apps/shop, next start)   127.0.0.1:BROWSER_TEST_SHOP_PORT (3303)
 //   Headless Edge/Chrome (CDP)     127.0.0.1:BROWSER_TEST_CDP_PORT  (9450)
 //
-// The development environment (API 3000, Backoffice 3001, PostgreSQL 5432)
-// is never used. Every resource is removed afterwards, also on failure or
+// The development environment (API 3000, Backoffice 3001, Shop 3002,
+// PostgreSQL 5432) is never used. Every resource is removed afterwards, also on failure or
 // Ctrl+C, and only resources this run created are removed. See README.md.
 //
 // Usage: npm run test:browser [-- --skip-build] [--keep]
@@ -29,17 +30,20 @@ import {
 } from "./lib/safety.mjs";
 import salesOrderOverviewSuite, { emptyOverviewSuite } from "./suites/sales-order-overview.mjs";
 import salesOrderSuite from "./suites/sales-orders.mjs";
+import shopFoundationSuite from "./suites/shop-foundation.mjs";
 
 // In this order: the empty overview needs a database without orders
 const SUITES = [
   ["Sales order overview: no orders yet (Sprint 10D-B)", emptyOverviewSuite],
   ["Sales orders (Sprint 10C)", salesOrderSuite],
   ["Sales order overview (Sprint 10D-B)", salesOrderOverviewSuite],
+  ["Shop foundation (Sprint 11)", shopFoundationSuite],
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const BACKOFFICE = resolve(here, "../..");
 const ERP_API = resolve(BACKOFFICE, "../erp-api");
+const SHOP = resolve(BACKOFFICE, "../shop");
 
 const port = (name, fallback) => (process.env[name] ? Number(process.env[name]) : fallback);
 let ports;
@@ -49,6 +53,7 @@ try {
     api: port("BROWSER_TEST_API_PORT", 3300),
     backoffice: port("BROWSER_TEST_BO_PORT", 3301),
     deadBackoffice: port("BROWSER_TEST_DEAD_PORT", 3302),
+    shop: port("BROWSER_TEST_SHOP_PORT", 3303),
     // Never listened on: the Backoffice on deadBackoffice points here
     unreachableApi: port("BROWSER_TEST_UNREACHABLE_API_PORT", 3399),
     browser: port("BROWSER_TEST_CDP_PORT", 9450),
@@ -104,12 +109,17 @@ async function main() {
   console.log(`Browser tests, run ${runId}; logs and screenshots: ${runDir}`);
   step(`ports ${JSON.stringify(ports)} are valid and free`);
 
-  // 2. Current builds of both applications (production builds)
+  // 2. Current builds of the applications (production builds), one after
+  // the other; every app has its own output folder (dist, .next)
   if (!skipBuild) {
-    step("building the ERP API and the Backoffice");
+    step("building the ERP API, the Backoffice and the Shop");
     runToCompletion(process.execPath, [join(ERP_API, "node_modules/@nestjs/cli/bin/nest.js"), "build"], { cwd: ERP_API, env: process.env, label: "ERP API build" });
     runToCompletion(process.execPath, [join(BACKOFFICE, "node_modules/next/dist/bin/next"), "build"], { cwd: BACKOFFICE, env: process.env, label: "Backoffice build" });
+    // Without any service key in the environment: none can end up in the build
+    runToCompletion(process.execPath, [join(SHOP, "node_modules/next/dist/bin/next"), "build"], { cwd: SHOP, env: serviceEnvironment(process.env, {}), label: "Shop build" });
   }
+  // The shop service key of this run only; never printed
+  const shopServiceKey = randomBytes(32).toString("hex");
 
   // 3. Disposable database with all migrations
   const database = new DisposableDatabase({ runId, port: ports.database });
@@ -124,12 +134,17 @@ async function main() {
 
   // 4. ERP API, only on 127.0.0.1, only with the test database
   const apiUrl = `http://127.0.0.1:${ports.api}`;
-  const api = startProcess("ERP API", process.execPath, [join(ERP_API, "dist/main.js")], {
-    cwd: ERP_API,
-    env: serviceEnvironment(process.env, { DATABASE_URL: database.url, PORT: String(ports.api), HOST: "127.0.0.1" }),
-    logFile: join(runDir, "erp-api.log"),
-  });
-  onCleanup("ERP API", () => api.stop());
+  /** An ERP API process of this run (cleaned up like every other) */
+  const startErpApi = (name, settings) => {
+    const owned = startProcess(name, process.execPath, [join(ERP_API, "dist/main.js")], {
+      cwd: ERP_API,
+      env: serviceEnvironment(process.env, { DATABASE_URL: database.url, SHOP_SERVICE_KEY: shopServiceKey, ...settings }),
+      logFile: join(runDir, `${name.replace(/W+/g, "-").toLowerCase()}.log`),
+    });
+    onCleanup(name, () => owned.stop());
+    return owned;
+  };
+  const api = startErpApi("ERP API", { PORT: String(ports.api), HOST: "127.0.0.1" });
   await waitForHttp(`${apiUrl}/sales-areas`, api);
   step(`ERP API ready on ${apiUrl}`);
 
@@ -165,7 +180,18 @@ async function main() {
   await waitForHttp(`${deadUrl}/`, deadBackoffice);
   step(`Backoffice ready on ${boUrl} (and ${deadUrl} without ERP API)`);
 
-  // 7. Browser
+  // 7. Shop, only on 127.0.0.1, with the test API and this run's service key
+  const shopUrl = `http://127.0.0.1:${ports.shop}`;
+  const shop = startProcess("Shop", process.execPath, [join(SHOP, "node_modules/next/dist/bin/next"), "start", "--port", String(ports.shop), "--hostname", "127.0.0.1"], {
+    cwd: SHOP,
+    env: serviceEnvironment(process.env, { ERP_API_URL: assertTestApiUrl(apiUrl, ports.api), SHOP_SERVICE_KEY: shopServiceKey }),
+    logFile: join(runDir, "shop.log"),
+  });
+  onCleanup("Shop", () => shop.stop());
+  await waitForHttp(`${shopUrl}/`, shop);
+  step(`Shop ready on ${shopUrl}`);
+
+  // 8. Browser
   const { browser, page } = await launchBrowser({
     executable: browserExecutable,
     port: ports.browser,
@@ -179,14 +205,18 @@ async function main() {
   });
   step(`browser ready (${browserExecutable})`);
 
-  // 8. Suites
+  // 9. Suites
   const results = [];
   const context = {
     page,
     api: callApi,
     sql: (query) => database.sql(query),
-    urls: { backoffice: boUrl, deadBackoffice: deadUrl, api: apiUrl },
+    urls: { backoffice: boUrl, deadBackoffice: deadUrl, api: apiUrl, shop: shopUrl, unreachableApiPort: ports.unreachableApi },
     fixtures,
+    shopServiceKey,
+    startErpApi,
+    // Folder of the service logs, e.g. to prove that no secret is logged
+    runDir,
     check: (name, ok, detail = "") => {
       results.push({ name, ok: Boolean(ok), detail });
       console.log(`${ok ? "  PASS" : "  FAIL"}  ${name}${ok || !detail ? "" : `  -> ${detail}`}`);

@@ -5,7 +5,7 @@ fully isolated, disposable environment. The development environment and its
 database `b2b_erp` are never used.
 
 ```
-npm run test:browser                  # build both apps, then test
+npm run test:browser                  # build the apps, then test
 npm run test:browser -- --skip-build  # reuse the existing builds
 npm run test:browser -- --keep        # keep logs and screenshots after success
 npm run test:browser:safety           # unit tests of the safety rules
@@ -26,33 +26,34 @@ Run from `apps/backoffice`. The exit code is 0 only when every check passed.
 | Step | Resource | Address |
 | ---- | -------- | ------- |
 | 1 | Checks: ports valid and free, Docker available, browser found | |
-| 2 | `nest build` (ERP API) and `next build` (Backoffice), unless `--skip-build` | |
+| 2 | `nest build` (ERP API), `next build` (Backoffice, Shop), one after the other, unless `--skip-build` | |
 | 3 | PostgreSQL container `b2b-browser-test-<runId>`, memory only (tmpfs), all migrations via `prisma migrate deploy` | `127.0.0.1:55450` |
 | 4 | ERP API (`node dist/main.js`) with the test database | `127.0.0.1:3300` |
 | 5 | Test data created through the ERP API (`lib/fixtures.mjs`) | |
 | 6 | Backoffice (`next start`) with the test API | `127.0.0.1:3301` |
 | 6 | Second Backoffice whose ERP API is unreachable (error pages) | `127.0.0.1:3302` → `3399` |
+| 6 | Shop (`apps/shop`, `next start`) with the test API and a random service key of the run | `127.0.0.1:3303` |
 | 7 | Headless browser with a temporary profile (CDP) | `127.0.0.1:9450` |
 | 8 | Suites (`suites/*.mjs`), then cleanup | |
 
 Each port can be changed: `BROWSER_TEST_DB_PORT`, `BROWSER_TEST_API_PORT`,
-`BROWSER_TEST_BO_PORT`, `BROWSER_TEST_DEAD_PORT`,
+`BROWSER_TEST_BO_PORT`, `BROWSER_TEST_DEAD_PORT`, `BROWSER_TEST_SHOP_PORT`,
 `BROWSER_TEST_UNREACHABLE_API_PORT`, `BROWSER_TEST_CDP_PORT`.
 
 The test data is deterministic: Germany 1000/10/00 (EUR) with the account
 CUST-1000 and units UNIT-STUTTGART / UNIT-MUENCHEN, Poland 2000/10/00 (PLN,
-without prices) with UNIT-WARSZAWA, Japan 3000/10/00 (JPY) with UNIT-OSAKA.
+only MAT-101 priced) with UNIT-WARSZAWA, Japan 3000/10/00 (JPY) with UNIT-OSAKA.
 The suites read condition IDs from the fixtures, never fixed numbers.
 
 ## Safety guarantees
 
 - **Never the development database.** The test database URL must point to
   `127.0.0.1`, the test port, and a database named `*_test` (never
-  `b2b_erp`). `DATABASE_URL`, `PG*`, `ERP_API_URL`, `PORT`, `HOST` and
-  `HOSTNAME` are removed from the inherited environment and set explicitly,
+  `b2b_erp`). `DATABASE_URL`, `PG*`, `ERP_API_URL`, `SHOP_SERVICE_KEY`,
+  `PORT`, `HOST` and `HOSTNAME` are removed from the inherited environment and set explicitly,
   so the root `.env` cannot redirect a service. After the fixtures, the runner
   checks inside the container that the API wrote there.
-- **Protected ports.** 3000, 3001 and 5432 are rejected for every test
+- **Protected ports.** 3000, 3001, 3002 and 5432 are rejected for every test
   service, as are duplicate ports and ports below 1024.
 - **Busy ports are never freed.** If a test port is in use, the run stops
   before changing anything. The runner never kills a process it did not
@@ -65,6 +66,9 @@ The suites read condition IDs from the fixtures, never fixed numbers.
   never touched. The container is started with `--rm` and tmpfs, so stopping
   it removes every test data. `docker compose` is never used.
 - **Localhost only.** Every service binds to `127.0.0.1`.
+- **Shop service key.** Each run generates its own random key for the ERP
+  shop API and the shop; it is never printed. The shop is built without any
+  key in its environment.
 - **Cleanup always runs**: after success, after a failure, after an
   exception and on Ctrl+C (SIGINT/SIGTERM). The order is browser, Backoffice
   instances, ERP API, database.
@@ -84,7 +88,8 @@ Runs must be sequential. Concurrent runs are not supported:
   check that the data is in its own database fails). Only disposable test
   databases are involved, never `b2b_erp`, but both runs may fail.
 - **Shared build output.** `next build` writes `apps/backoffice/.next` and
-  `nest build` writes `apps/erp-api/dist`. A build of one run replaces the
+  `apps/shop/.next`, `nest build` writes `apps/erp-api/dist`. Within one run
+  the builds run one after the other. A build of one run replaces the
   files that the services of another run (or a running `npm run start` of
   the Backoffice) are using. Other ports via the variables above do not
   avoid this, not even with `--skip-build` on one side.
@@ -105,7 +110,10 @@ ERP API integration and E2E tests use their own ports (55433, 55435).
 - `lib/fixtures.mjs` – test data
 - `suites/sales-orders.mjs` – Sprint 10C: create and confirm sales orders
 - `suites/sales-order-overview.mjs` – Sprint 10D-B: the sales order overview
-  (an empty part runs first, the main part last; see `SUITES` in `run.mjs`)
+  (an empty part runs first, the main part later; see `SUITES` in `run.mjs`)
+- `suites/shop-foundation.mjs` – Sprint 11: shop frame, security headers,
+  health checks, the shop/ERP boundary, the service key and the refused
+  non-local binding of the ERP API (runs last)
 
 A new suite is a module whose default export receives
 `{ page, api, sql, urls, fixtures, check, section }`; add it to `SUITES` in

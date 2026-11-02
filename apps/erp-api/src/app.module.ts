@@ -11,6 +11,7 @@ import { PriceConditionsModule } from './price-conditions/price-conditions.modul
 import { PricingModule } from './pricing/pricing.module';
 import { SalesAreasModule } from './sales-areas/sales-areas.module';
 import { SalesOrdersModule } from './sales-orders/sales-orders.module';
+import { ShopModule } from './shop/shop.module';
 
 @Module({
   imports: [
@@ -24,6 +25,8 @@ import { SalesOrdersModule } from './sales-orders/sales-orders.module';
     PriceConditionsModule,
     PricingModule,
     SalesOrdersModule,
+    // Customer-facing API /shop/v1, separate from the admin API above
+    ShopModule,
   ],
   controllers: [AppController],
   providers: [AppService],
