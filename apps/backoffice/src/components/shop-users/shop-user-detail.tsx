@@ -9,6 +9,7 @@ import {
   ACTIVATION_LABELS,
   activationBlocker,
   assignableUnits,
+  inactiveUnits,
   formatTimestamp,
   UNIT_ACCESS_LABELS,
 } from "@/lib/shop-user-display";
@@ -137,6 +138,8 @@ export function ShopUserDetailPanel({
 
   const isBusy = busy !== null;
   const accountUnits = user ? assignableUnits(units ?? [], user.account.customerNumber, user.units.map((u) => u.unitId)) : [];
+  // Inactive units of the account that are not assigned: shown as not assignable
+  const closedUnits = user ? inactiveUnits(units ?? [], user.account.customerNumber, user.units.map((u) => u.unitId)) : [];
   const nameChanged = user !== null && displayName.trim() !== user.displayName;
 
   return (
@@ -262,7 +265,14 @@ export function ShopUserDetailPanel({
               <label htmlFor="assign-unit" className="sr-only">
                 Unit to assign
               </label>
-              <select id="assign-unit" value={unitToAssign} onChange={(event) => setUnitToAssign(event.target.value)} disabled={accountUnits.length === 0} className={`${inputClass(undefined)} min-w-0 flex-1`}>
+              <select
+                id="assign-unit"
+                value={unitToAssign}
+                onChange={(event) => setUnitToAssign(event.target.value)}
+                disabled={accountUnits.length === 0 && closedUnits.length === 0}
+                aria-describedby={closedUnits.length > 0 ? "assign-unit-inactive" : undefined}
+                className={`${inputClass(undefined)} min-w-0 flex-1`}
+              >
                 <option value="">
                   {units === null ? "Loading units…" : accountUnits.length === 0 ? "No further active unit of this account" : "Select a unit of this account"}
                 </option>
@@ -271,11 +281,23 @@ export function ShopUserDetailPanel({
                     {unit.unitId} · {unit.name}
                   </option>
                 ))}
+                {/* Shown, but never selectable: the ERP refuses them as well */}
+                {closedUnits.map((unit) => (
+                  <option key={unit.unitId} value={unit.unitId} disabled data-inactive-option={unit.unitId}>
+                    {unit.unitId} · {unit.name} (inactive, cannot be assigned)
+                  </option>
+                ))}
               </select>
               <button type="submit" data-action="assign" disabled={isBusy || !unitToAssign} className="rounded-md border border-line bg-surface px-4 py-2 font-medium hover:bg-canvas disabled:opacity-50">
                 {busy === "units" ? "Saving…" : "Assign"}
               </button>
             </form>
+            {closedUnits.length > 0 && (
+              <p id="assign-unit-inactive" data-inactive-units-hint className="mt-2 text-xs text-ink-muted">
+                Inactive units cannot be assigned to shop users: {closedUnits.map((unit) => unit.unitId).join(", ")}.
+                Units that were already assigned before they became inactive stay view only.
+              </p>
+            )}
           </Section>
 
           {/* Activation */}

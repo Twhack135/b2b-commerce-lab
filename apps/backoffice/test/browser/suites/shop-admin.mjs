@@ -17,6 +17,7 @@ const PIOTR = { email: "piotr.nowak@warszawa.example", name: "Piotr Nowak", pass
 export default async function shopAdminSuite({ page, api, urls, sql, shopServiceKey, runDir, check, section }) {
   const BO = urls.backoffice;
   const SHOP = urls.shop;
+  const annaId = () => sql(`SELECT id FROM shop_users WHERE email = '${ANNA.email}'`);
   const evaluate = (expression) => page.evaluate(expression);
   page.extraHelpers = `
     window.$confirm = (label) => [...document.querySelector('[aria-labelledby=confirm-dialog-title]').querySelectorAll('button')].find(b => b.textContent.trim() === label).click();
@@ -86,6 +87,15 @@ export default async function shopAdminSuite({ page, api, urls, sql, shopService
   await page.goto(`${BO}/shop-users`, "!!document.querySelector('[data-local-only-notice]') && document.body.innerText.includes('No shop users yet')");
   check("The page states that the Backoffice has no administrator sign-in and is local only", (await evaluate("$text('[data-local-only-notice]')")).includes("must never be made reachable from other computers"));
   check("Navigation has 'Shop Users'", (await evaluate("[...document.querySelectorAll('nav a')].some(a => a.getAttribute('href') === '/shop-users' && a.getAttribute('aria-current') === 'page')")));
+
+  // Sprint 12C acceptance (UX-001): "Open Shop" with the configured shops only
+  await evaluate("[...document.querySelectorAll('[data-shop-links] button')].find(b => b.textContent.includes('Open Shop')).click()");
+  await page.waitFor("!!document.querySelector('[data-shop-link=test]')", "shop links loaded");
+  const testShop = await evaluate("(() => { const a = document.querySelector('a[data-shop-link=test]'); return a && { href: a.getAttribute('href'), target: a.target, rel: a.rel }; })()");
+  check("'Open Shop': the configured test shop opens in a new tab without opener or referrer", testShop?.href === SHOP && testShop.target === "_blank" && testShop.rel.split(" ").includes("noopener") && testShop.rel.split(" ").includes("noreferrer"), JSON.stringify(testShop));
+  check("'Open Shop': an unconfigured environment is shown disabled, not as a link", (await evaluate("!document.querySelector('a[data-shop-link=production]') && document.querySelector('[data-shop-link=production]')?.getAttribute('aria-disabled') === 'true' && document.querySelector('[data-shop-link=production]').textContent.includes('Not configured')")));
+  await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))");
+  await page.waitFor("!document.querySelector('[data-shop-link]')", "menu closed");
 
   await evaluate("$btn('New Shop User').click()");
   await page.waitFor("!!document.querySelector('[data-shop-user-create]')", "create form");
@@ -188,6 +198,15 @@ export default async function shopAdminSuite({ page, api, urls, sql, shopService
   await openUser(ANNA.email);
   check("The Backoffice shows the same: 'View only', and the unit cannot be assigned anew", (await evaluate("$text('[data-assigned-unit=\"UNIT-STUTTGART\"]')")).includes("View only"));
   sql("UPDATE b2b_units SET is_active = true WHERE unit_id = 'UNIT-STUTTGART'");
+  // Sprint 12C acceptance (BUG-003): inactive units are not assignable (rule
+  // unchanged); the selection shows them as disabled with the reason
+  sql("UPDATE b2b_units SET is_active = false WHERE unit_id = 'UNIT-MUENCHEN'");
+  await openUser(ANNA.email);
+  await page.waitFor("!!document.querySelector('[data-inactive-option=\"UNIT-MUENCHEN\"]')", "inactive option");
+  check("An inactive unit is listed as a disabled option with the reason", (await evaluate("document.querySelector('[data-inactive-option=\"UNIT-MUENCHEN\"]').disabled")) && (await evaluate("$text('[data-inactive-units-hint]')")).includes("Inactive units cannot be assigned"));
+  const inactiveAssign = await evaluate(`fetch('/api/erp/shop-users/${annaId()}/units/UNIT-MUENCHEN', { method: 'PUT' }).then(r => r.status)`);
+  check("The ERP still refuses to assign an inactive unit (422)", inactiveAssign === 422);
+  sql("UPDATE b2b_units SET is_active = true WHERE unit_id = 'UNIT-MUENCHEN'");
 
   section("Sessions, disabling and enabling from the Backoffice");
   await openUser(ANNA.email);

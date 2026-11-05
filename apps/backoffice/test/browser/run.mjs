@@ -174,7 +174,8 @@ async function main() {
   const startBackoffice = (name, boPort, erpApiUrl) => {
     const owned = startProcess(name, process.execPath, [nextBin, "start", "--port", String(boPort), "--hostname", "127.0.0.1"], {
       cwd: BACKOFFICE,
-      env: serviceEnvironment(process.env, { ERP_API_URL: erpApiUrl }),
+      // "Open Shop": the test shop is configured, the production shop not
+      env: serviceEnvironment(process.env, { ERP_API_URL: erpApiUrl, SHOP_LINK_TEST_URL: shopUrl }),
       logFile: join(runDir, `${name.replace(/\W+/g, "-").toLowerCase()}.log`),
     });
     onCleanup(name, () => owned.stop());

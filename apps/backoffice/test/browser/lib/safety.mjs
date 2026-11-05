@@ -101,7 +101,7 @@ export function serviceEnvironment(base, settings) {
   for (const name of Object.keys(env)) {
     if (/^PG[A-Z]+$/.test(name)) delete env[name];
   }
-  for (const name of ["DATABASE_URL", "ERP_API_URL", "SHOP_SERVICE_KEY", "SHOP_TRUSTED_PROXY_HOPS", "SHOP_PUBLIC_URL", "PORT", "HOST", "HOSTNAME"]) {
+  for (const name of ["DATABASE_URL", "ERP_API_URL", "SHOP_SERVICE_KEY", "SHOP_TRUSTED_PROXY_HOPS", "SHOP_PUBLIC_URL", "SHOP_LINK_TEST_URL", "SHOP_LINK_PRODUCTION_URL", "PORT", "HOST", "HOSTNAME"]) {
     delete env[name];
   }
   return { ...env, ...settings };

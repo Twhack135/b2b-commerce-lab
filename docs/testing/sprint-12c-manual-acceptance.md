@@ -150,6 +150,17 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 
 ### B. Activation links
 
+**A6 – "Open Shop" menu**
+1. In the BO header, click **Open Shop**.
+2. Expected: "Test shop" with the address `http://127.0.0.1:3313` and an
+   arrow; "Production shop" greyed out with "Not configured" (this
+   environment has no production shop).
+3. Click "Test shop". Expected: the shop opens in a **new tab**; the
+   Backoffice tab stays as it was.
+4. The addresses come from the configuration of the Backoffice
+   (`SHOP_LINK_TEST_URL`, `SHOP_LINK_PRODUCTION_URL`, see
+   `docs/local-setup.md`); the acceptance environment sets the test shop.
+
 **B1 – The link is shown once**
 1. Open Anna, section "Activation", click **Create activation link**,
    confirm with **Create link**.
@@ -201,6 +212,13 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 2. Expected: "Incorrect email or password. Please try again." The same message for an
    unknown address such as `nobody@mueller.example`.
 
+**C1a – The e-mail address stays after a failed attempt**
+1. Shop `/login`: Anna's address with a wrong password, **Sign in**.
+2. Expected: the error message; the e-mail field still contains Anna's
+   address, the password field is empty and has the cursor. The address
+   bar shows `/login?error=invalid`, never the e-mail address.
+3. Enter the right password, **Sign in**: "My account" opens.
+
 **C2 – Sign in**
 1. Sign in as Anna.
 2. Expected: "My account" with "Welcome, Anna Weber", "Müller Heiztechnik
@@ -244,6 +262,12 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 1. BO: open Piotr. In "Authorized B2B units", open the unit selection.
 2. Expected: no Müller or Osaka unit is offered ("No further active unit of
    this account").
+3. Rule (confirmed after the acceptance test, BUG-003): **inactive units
+   cannot be assigned**. Deactivate `UNIT-MUENCHEN` (BO → B2B Units), open a
+   user of CUST-1000 who does not have it: it is listed greyed out as
+   "(inactive, cannot be assigned)", with a note below the selection.
+   Units assigned before they became inactive stay view only (F2).
+   Reactivate `UNIT-MUENCHEN` afterwards.
 
 **E3 (optional, needs browser developer tools) – A manipulated unit cookie grants nothing**
 1. In the private window (Piotr), open the developer tools (F12) →
@@ -373,6 +397,18 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 | Changes | Removed units, disabled users and inactive accounts take effect with the next request |
 | Sessions | Ending sessions signs out; disabling blocks sign-in; reactivation restores no old session |
 
+## 5a. Results of the first acceptance run and follow-up
+
+| Finding | Outcome | Retest |
+| ------- | ------- | ------ |
+| Activation form (button looked like loading, reload message) | fixed | B3 |
+| Technical error page after a wrong password following activation | fixed | C1, C1a |
+| BUG-003 inactive units missing in the selection | rule confirmed (not assignable); now shown greyed out with the reason | E2 step 3 |
+| UX-001 "Open Shop" in the Backoffice | added | A6 |
+| UX-002 keep the e-mail address after a failed sign-in | added | C1a |
+| GAP-001 password reset for activated users | separate change set (administrator-issued reset link) | – |
+| 24-hour expiry of activation links (not tested manually) | automated: valid until the last millisecond of the 24 hours, refused from then on (`apps/erp-api/test/integration/shop-auth-api.int-spec.ts`) | – |
+
 ## 6. Pass/Fail checklist
 
 | ID | Test case | Pass | Fail | Note |
@@ -382,11 +418,13 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 | A3 | Create Anna with two units (own units only) | ☐ | ☐ | |
 | A4 | Create Ben and Piotr, duplicate e-mail refused | ☐ | ☐ | |
 | A5 | Search and filter | ☐ | ☐ | |
+| A6 | "Open Shop" menu (configured test shop, unconfigured production shop) | ☐ | ☐ | |
 | B1 | Link shown once | ☐ | ☐ | |
 | B2 | New link replaces the old one | ☐ | ☐ | |
 | B3 | Activation of Anna | ☐ | ☐ | |
 | B4 | Links work only once | ☐ | ☐ | |
 | C1 | Generic sign-in failure | ☐ | ☐ | |
+| C1a | E-mail address kept after a failed attempt | ☐ | ☐ | |
 | C2 | Sign in | ☐ | ☐ | |
 | C3 | Sign out | ☐ | ☐ | |
 | D1 | Choose a unit | ☐ | ☐ | |

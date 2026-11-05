@@ -95,7 +95,7 @@ async function main() {
   );
 
   const next = (dir) => join(dir, "node_modules/next/dist/bin/next");
-  const backoffice = start("Backoffice", process.execPath, [next(BACKOFFICE), "start", "--port", String(ports.backoffice), "--hostname", "127.0.0.1"], BACKOFFICE, { ERP_API_URL: assertTestApiUrl(urls.api, ports.api) });
+  const backoffice = start("Backoffice", process.execPath, [next(BACKOFFICE), "start", "--port", String(ports.backoffice), "--hostname", "127.0.0.1"], BACKOFFICE, { ERP_API_URL: assertTestApiUrl(urls.api, ports.api), SHOP_LINK_TEST_URL: urls.shop });
   const shop = start("Shop", process.execPath, [next(SHOP), "start", "--port", String(ports.shop), "--hostname", "127.0.0.1"], SHOP, { ERP_API_URL: assertTestApiUrl(urls.api, ports.api), SHOP_SERVICE_KEY: shopServiceKey });
   await waitForHttp(`${urls.backoffice}/`, backoffice);
   await waitForHttp(`${urls.shop}/`, shop);

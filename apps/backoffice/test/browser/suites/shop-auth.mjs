@@ -88,6 +88,7 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
   // raw JSON refusal of the origin check instead of the sign-in page
   await evaluate("document.querySelector('[data-activation=done] a').click()");
   await page.waitFor("location.pathname === '/login' && !!document.querySelector('[data-login-form]')?.offsetParent", "sign-in page after activation");
+  check("After activation the sign-in page says the access is ready (message from the URL)", (await evaluate("$text('[data-notice]')")) === "Your access is ready. Sign in with your new password.");
   await evaluate(`$setEl(document.getElementById('email'), ${JSON.stringify(EMAIL)}); $setEl(document.getElementById('password'), 'wrong password 7654321'); document.querySelector('[data-login-form]').requestSubmit()`);
   await arrived("location.search === '?error=invalid' && !!document.querySelector('[data-notice=error]')?.offsetParent", "wrong password after activation");
   check("Right after activation, a wrong password stays on the sign-in page with a friendly message", (await evaluate("location.pathname")) === "/login" && (await evaluate("$text('[data-notice=error]')")) === "Incorrect email or password. Please try again." && !(await evaluate("document.body.innerText.includes('statusCode')")));
@@ -109,6 +110,8 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
   const failureText = "Incorrect email or password. Please try again.";
   await signIn(EMAIL, "wrong password 1234567");
   await arrived("location.search === '?error=invalid'", "wrong password");
+  // Sprint 12C acceptance (UX-002): the address stays, only the password is cleared
+  check("After a failed attempt the e-mail address stays, the password is cleared and focused", (await evaluate("document.getElementById('email').value")) === EMAIL && (await evaluate("document.getElementById('password').value")) === "" && (await evaluate("document.activeElement?.id")) === "password" && !(await evaluate(`location.href.includes(${JSON.stringify(encodeURIComponent(EMAIL))}) || location.href.includes(${JSON.stringify(EMAIL)}) || JSON.stringify({ ...localStorage, ...sessionStorage }).includes(${JSON.stringify(EMAIL)}) || document.cookie.includes('mueller')`)));
   const wrongPassword = await evaluate("$text('[data-notice=error]')");
   await signIn("nobody@mueller.example", PASSWORD);
   await arrived("location.search === '?error=invalid'", "unknown user");

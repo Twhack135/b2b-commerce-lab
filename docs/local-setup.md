@@ -13,6 +13,7 @@ files without values are committed.
 | `SHOP_SERVICE_KEY` | `.env` (repository root) | ERP API | Key the ERP shop API `/shop/v1` expects from the shop |
 | `SHOP_PUBLIC_URL` | `.env` (repository root, optional) | ERP API | Shop address in activation links; default `http://127.0.0.1:3002` (https, or http on this computer only) |
 | `ERP_API_URL` | `apps/backoffice/.env.local` (optional) | Backoffice server | ERP address; default `http://localhost:3000` |
+| `SHOP_LINK_TEST_URL`, `SHOP_LINK_PRODUCTION_URL` | `apps/backoffice/.env.local` (optional) | Backoffice server | Shops in the "Open Shop" menu (https, or http on this computer); unset entries are shown as "Not configured" |
 | `ERP_API_URL` | `apps/shop/.env.local` | Shop server | ERP address, e.g. `http://127.0.0.1:3000` |
 | `SHOP_SERVICE_KEY` | `apps/shop/.env.local` | Shop server | The same value as in the root `.env` |
 

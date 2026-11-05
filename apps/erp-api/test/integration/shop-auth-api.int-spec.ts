@@ -187,6 +187,40 @@ describe('Shop sign-in /shop/v1/auth (Sprint 12B)', () => {
       expect(await prisma.shopUserCredential.count()).toBe(0);
     });
 
+    // Manual acceptance test 29 (24-hour expiry), automated: valid until
+    // the last millisecond, refused from the 24th hour on
+    it('is valid for exactly 24 hours', async () => {
+      const early = await users.createUser({
+        accountCustomerNumber: 'CUST-1000',
+        email: 'early@mueller.example',
+        displayName: 'Early',
+      });
+      const late = await users.createUser({
+        accountCustomerNumber: 'CUST-1000',
+        email: 'late@mueller.example',
+        displayName: 'Late',
+      });
+      const first = await auth.issueActivation(early.id);
+      const second = await auth.issueActivation(late.id);
+      expect(first.expiresAt.toISOString()).toBe(at(24 * 60 * MINUTE));
+
+      advance(24 * 60 * MINUTE - 1);
+      await post('activation', {
+        token: first.token,
+        password: PASSWORD,
+      }).expect(204);
+      advance(1);
+      expect(
+        (
+          await post('activation', {
+            token: second.token,
+            password: PASSWORD,
+          }).expect(400)
+        ).body,
+      ).toEqual(INVALID_ACTIVATION);
+      expect(await prisma.shopUserCredential.count()).toBe(1);
+    });
+
     it('redeems a link exactly once when it is submitted many times at once', async () => {
       const user = await users.createUser({
         accountCustomerNumber: 'CUST-1000',

@@ -1,4 +1,5 @@
 import { MenuIcon } from "./icons";
+import { ShopLinksMenu } from "./shop-links-menu";
 
 export function Header({ onOpenNav }: { onOpenNav: () => void }) {
   return (
@@ -14,7 +15,11 @@ export function Header({ onOpenNav }: { onOpenNav: () => void }) {
 
       <span className="font-semibold">ERP Backoffice</span>
 
-      <span className="ml-auto rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-strong">
+      <div className="ml-auto">
+        <ShopLinksMenu />
+      </div>
+
+      <span className="rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-strong">
         Development
       </span>
     </header>
