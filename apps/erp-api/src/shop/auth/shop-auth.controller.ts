@@ -14,10 +14,11 @@ import {
 import type { Request } from 'express';
 import { AuthorizedUnit } from '../users/shop-user.interface';
 import { ShopUsersService } from '../users/shop-users.service';
-import { ActivateDto, LoginDto } from './dto/shop-auth.dto';
+import { ActivateDto, LoginDto, ResetPasswordDto } from './dto/shop-auth.dto';
 import {
   InvalidActivationError,
   InvalidCredentialsError,
+  InvalidPasswordResetError,
   PasswordPolicyError,
   TooManyAttemptsError,
 } from './shop-auth.errors';
@@ -71,6 +72,14 @@ function toHttpError(error: unknown): never {
       error: 'Bad Request',
     });
   }
+  if (error instanceof InvalidPasswordResetError) {
+    throw new BadRequestException({
+      statusCode: 400,
+      code: 'RESET_INVALID',
+      message: [error.message],
+      error: 'Bad Request',
+    });
+  }
   throw error;
 }
 
@@ -96,6 +105,29 @@ export class ShopAuthController {
   ): Promise<void> {
     try {
       await this.auth.activate(
+        dto.token,
+        dto.password,
+        clientAddressOf(request),
+      );
+    } catch (error) {
+      toHttpError(error);
+    }
+  }
+
+  /**
+   * A new password with a reset link from the administration (Sprint 12C).
+   * Ends every session of the user; 400 RESET_INVALID for every link that
+   * cannot be used, without saying why.
+   */
+  @Post('password-reset')
+  @HttpCode(204)
+  @Header('Cache-Control', 'no-store')
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() request: Request,
+  ): Promise<void> {
+    try {
+      await this.auth.resetPassword(
         dto.token,
         dto.password,
         clientAddressOf(request),

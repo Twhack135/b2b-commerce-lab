@@ -42,3 +42,22 @@ export class ActivationNotPossibleError extends Error {
     this.name = 'ActivationNotPossibleError';
   }
 }
+
+/** Unknown, used or expired reset link, or a user who may not reset */
+export class InvalidPasswordResetError extends Error {
+  constructor() {
+    super('The password reset link is invalid or has expired.');
+    this.name = 'InvalidPasswordResetError';
+  }
+}
+
+export type PasswordResetRefusal =
+  'USER_NOT_FOUND' | 'USER_DISABLED' | 'ACCOUNT_INACTIVE' | 'NOT_ACTIVATED';
+
+/** A reset link cannot be issued (administration only) */
+export class PasswordResetNotPossibleError extends Error {
+  constructor(readonly reason: PasswordResetRefusal) {
+    super(`No password reset link can be issued: ${reason}`);
+    this.name = 'PasswordResetNotPossibleError';
+  }
+}

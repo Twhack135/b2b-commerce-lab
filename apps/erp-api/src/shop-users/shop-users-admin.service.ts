@@ -14,6 +14,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import {
   activationLink,
+  passwordResetLink,
   SHOP_PUBLIC_URL_ENV,
   shopOrigin,
 } from '../shop/auth/activation-link';
@@ -22,7 +23,10 @@ import {
   SESSION_IDLE_MS,
   sessionEndsAt,
 } from '../shop/auth/session-rules';
-import { ActivationNotPossibleError } from '../shop/auth/shop-auth.errors';
+import {
+  ActivationNotPossibleError,
+  PasswordResetNotPossibleError,
+} from '../shop/auth/shop-auth.errors';
 import { ShopAuthService } from '../shop/auth/shop-auth.service';
 import {
   isUuid,
@@ -40,6 +44,7 @@ import {
 } from './shop-user-admin-rules';
 import {
   IssuedActivationLink,
+  IssuedPasswordResetLink,
   ShopUserDetail,
   ShopUserSummary,
 } from './shop-user-admin.interface';
@@ -75,6 +80,13 @@ const ACTIVATION_REFUSALS = {
   ACCOUNT_INACTIVE: 'The customer account of the shop user is inactive.',
   ALREADY_ACTIVATED:
     'The shop user has already set a password. Activation links are only for the first password.',
+} as const;
+
+const RESET_REFUSALS = {
+  USER_DISABLED: 'The shop user is disabled. Enable the user first.',
+  ACCOUNT_INACTIVE: 'The customer account of the shop user is inactive.',
+  NOT_ACTIVATED:
+    'The shop user has not set a password yet. Create an activation link instead.',
 } as const;
 
 /**
@@ -277,6 +289,36 @@ export class ShopUsersAdminService {
     }
   }
 
+  /**
+   * A new one-time password reset link (valid 4 hours) for an activated
+   * user, replacing an unused one. Returned exactly once; the ERP keeps
+   * only the hash of its token. The current password stays valid until the
+   * link is used; using it ends every session of the user.
+   */
+  async issuePasswordResetLink(
+    userId: string,
+  ): Promise<IssuedPasswordResetLink> {
+    const origin = shopOrigin(process.env[SHOP_PUBLIC_URL_ENV]);
+    if (!origin) {
+      throw new ServiceUnavailableException(
+        `${SHOP_PUBLIC_URL_ENV} is not a valid shop address (https, or http on this computer).`,
+      );
+    }
+    try {
+      const { token, expiresAt } = await this.auth.issuePasswordReset(userId);
+      return {
+        resetLink: passwordResetLink(origin, token),
+        expiresAt: expiresAt.toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof PasswordResetNotPossibleError) {
+        if (error.reason === 'USER_NOT_FOUND') throw userNotFound();
+        throw new ConflictException(RESET_REFUSALS[error.reason]);
+      }
+      throw error;
+    }
+  }
+
   /** Ends one session of the user (it cannot be used again) */
   async revokeSession(
     userId: string,
@@ -334,9 +376,14 @@ function userSelect(now: Date) {
     account: {
       select: { customer: { select: { name: true, isActive: true } } },
     },
-    credential: { select: { createdAt: true } },
+    credential: { select: { createdAt: true, updatedAt: true } },
     // At most one unused link exists (partial unique index)
     activationTokens: {
+      where: { usedAt: null },
+      select: { createdAt: true, expiresAt: true },
+    },
+    // At most one unused reset link exists (partial unique index)
+    passwordResets: {
       where: { usedAt: null },
       select: { createdAt: true, expiresAt: true },
     },
@@ -385,8 +432,9 @@ type UserRecord = {
   createdAt: Date;
   updatedAt: Date;
   account: { customer: { name: string; isActive: boolean } };
-  credential: { createdAt: Date } | null;
+  credential: { createdAt: Date; updatedAt: Date } | null;
   activationTokens: { createdAt: Date; expiresAt: Date }[];
+  passwordResets: { createdAt: Date; expiresAt: Date }[];
   units: {
     assignedAt: Date;
     unit: {
@@ -410,6 +458,7 @@ type UserRecord = {
 function toDetail(record: UserRecord, now: Date): ShopUserDetail {
   const access = shopAccess(record.status, record.account.customer.isActive);
   const [openLink] = record.activationTokens;
+  const [openReset] = record.passwordResets;
   const sessions = record.sessions.filter((s) => isSessionOpen(s, now));
   return {
     id: record.id,
@@ -453,6 +502,17 @@ function toDetail(record: UserRecord, now: Date): ShopUserDetail {
           ? {
               createdAt: openLink.createdAt.toISOString(),
               expiresAt: openLink.expiresAt.toISOString(),
+            }
+          : null,
+    },
+    passwordReset: {
+      passwordChangedAt: record.credential?.updatedAt.toISOString() ?? null,
+      // An expired link is no longer shown: a new one can be issued at once
+      openLink:
+        openReset && openReset.expiresAt > now
+          ? {
+              createdAt: openReset.createdAt.toISOString(),
+              expiresAt: openReset.expiresAt.toISOString(),
             }
           : null,
     },

@@ -142,6 +142,12 @@ const ALLOWED_ROUTES: Route[] = [
     path: ["shop-users", ":userId", "activation-link"],
     params: { userId: UUID },
   },
+  // A password reset link for an activated user (shown once, 4 hours)
+  {
+    method: "POST",
+    path: ["shop-users", ":userId", "password-reset-link"],
+    params: { userId: UUID },
+  },
   {
     method: "POST",
     path: ["shop-users", ":userId", "sessions", ":sessionId", "revoke"],

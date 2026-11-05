@@ -84,8 +84,30 @@ Status: accepted; implemented in Sprint 12B (with the deviations below)
    factor: at least 15 characters, at most 128, no composition rules,
    Unicode NFKC, common values and the e-mail address refused.
 
+## Password reset (Sprint 12C, after the manual acceptance test)
+
+- Issued only by the local administration (Backoffice, admin API
+  `POST /shop-users/:id/password-reset-link`) for activated, active users of
+  active accounts. There is **no public "forgot password"** (no e-mail
+  delivery yet).
+- One-time link `/reset-password#token=...`, valid **4 hours**, stored only as
+  a SHA-256 hash in its own table `shop_password_resets` (migration
+  `20261105090000_add_shop_password_resets`), so activation and reset links
+  can never be used for each other. A new link replaces an unused one; the
+  4-hour limit is also a CHECK constraint.
+- Redeemed with `POST /shop/v1/auth/password-reset` (service key, rate limit
+  like the activation, counted apart), in one transaction under row locks:
+  the link is used up, the password replaced (unchanged password rules) and
+  **every session of the user revoked**. A disabled user or an inactive
+  account cannot reset.
+- A sign-in that checked the old password while a reset was running is
+  refused: it re-reads the password hash after taking its locks (the
+  credential row is locked as well).
+- The Backoffice shows the link once and asks to share it only through a
+  verified, secure channel.
+
 ## Not yet implemented
 
-Password reset, e-mail delivery, cleanup of expired sessions and tokens,
+Self-service password reset ("forgot password"), e-mail delivery, cleanup of expired sessions and tokens,
 an audit log, and durable rate limits shared by several ERP processes
 (required before any deployment, docs/adr/0006).

@@ -616,6 +616,8 @@ model ShopUser {
   // Sign-in (Sprint 12B): the password, activation tokens and sessions
   credential       ShopUserCredential?
   activationTokens ShopActivationToken[]
+  // Password reset links issued by the administration (Sprint 12C)
+  passwordResets   ShopPasswordReset[]
   sessions         ShopSession[]
 
   // Target of the foreign key that keeps unit assignments in the user's account
@@ -677,6 +679,26 @@ model ShopActivationToken {
   @@unique([userId], where: raw("used_at IS NULL"), map: "shop_activation_tokens_one_open_key")
   @@index([userId], map: "shop_activation_tokens_user_idx")
   @@map("shop_activation_tokens")
+}
+
+/// A one-time link with which an activated user sets a new password,
+/// issued by the administration (Sprint 12C). Deliberately its own table:
+/// an activation link can never reset a password and a reset link can
+/// never activate. Valid for 4 hours; used_at is set when it is redeemed.
+model ShopPasswordReset {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+
+  user ShopUser @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "shop_password_resets_user_fkey")
+
+  // At most one open (unused) link per user: a new one replaces the old one
+  @@unique([userId], where: raw("used_at IS NULL"), map: "shop_password_resets_one_open_key")
+  @@index([userId], map: "shop_password_resets_user_idx")
+  @@map("shop_password_resets")
 }
 
 /// A signed-in browser of a shop user. Valid until revoked (sign-out), the

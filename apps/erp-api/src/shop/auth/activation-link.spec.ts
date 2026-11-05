@@ -1,4 +1,8 @@
-import { activationLink, shopOrigin } from './activation-link';
+import {
+  activationLink,
+  passwordResetLink,
+  shopOrigin,
+} from './activation-link';
 import { isSessionOpen, SESSION_IDLE_MS, sessionEndsAt } from './session-rules';
 
 describe('shopOrigin', () => {
@@ -32,6 +36,15 @@ describe('activationLink', () => {
   it('puts the token into the fragment, never into path or query', () => {
     const link = new URL(activationLink('http://127.0.0.1:3002', 'abc'));
     expect(link.pathname).toBe('/activate');
+    expect(link.search).toBe('');
+    expect(link.hash).toBe('#token=abc');
+  });
+});
+
+describe('passwordResetLink', () => {
+  it('has its own page and the token in the fragment only', () => {
+    const link = new URL(passwordResetLink('http://127.0.0.1:3002', 'abc'));
+    expect(link.pathname).toBe('/reset-password');
     expect(link.search).toBe('');
     expect(link.hash).toBe('#token=abc');
   });

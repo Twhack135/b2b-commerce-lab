@@ -205,6 +205,34 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 5. Expected in BO (click **Refresh**): all three users show "Activated";
    "Create new link" is disabled with "The user has already set a password".
 
+**B5 – Password reset for an activated user (GAP-001)**
+1. Sign in as Anna in the normal window (she must have set a password).
+2. BO: open Anna → section "Password reset" → **Create password reset link**,
+   confirm with **Create reset link**.
+3. Expected: a dialog "Password reset link for Anna Weber" with "Shown only
+   this once", the request to share it only through a **verified, secure
+   channel**, the expiry time (4 hours from now) and a link starting with
+   `http://127.0.0.1:3313/reset-password#token=`. Copy it, click **Done**.
+   The state shows "Reset link created …, valid until …".
+4. Until the link is used, Anna stays signed in and her current password
+   works.
+5. Open the reset link (any window). Expected: "Choose a new password"; the
+   address bar shows only `/reset-password`. Set a new password.
+6. Expected: "Your new password is set … signed out everywhere". In the
+   normal window, reload: Anna is on the sign-in page.
+7. Sign in with the **old** password: "Incorrect email or password. Please
+   try again." With the **new** password: "My account" opens.
+8. Open the reset link again and try to set a password. Expected: "This
+   password reset link is invalid or has expired."
+9. For a user who has not set a password yet, there is no reset section;
+   use the activation link instead. There is no "forgot password" in the
+   shop (on purpose).
+10. Note: the reset table needs the migration
+   `20261105090000_add_shop_password_resets`. The acceptance environment
+   applies all migrations to its disposable database; the development
+   database `b2b_erp` only gets it after approval
+   (`docs/runbooks/shop-password-resets-migration.md`).
+
 ### C. Sign-in and sign-out
 
 **C1 – Generic failure**
@@ -406,7 +434,7 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 | BUG-003 inactive units missing in the selection | rule confirmed (not assignable); now shown greyed out with the reason | E2 step 3 |
 | UX-001 "Open Shop" in the Backoffice | added | A6 |
 | UX-002 keep the e-mail address after a failed sign-in | added | C1a |
-| GAP-001 password reset for activated users | separate change set (administrator-issued reset link) | – |
+| GAP-001 password reset for activated users | added: administrator-issued reset link, 4 hours, ends all sessions (no public "forgot password") | B5 (replaces the skipped test 10) |
 | 24-hour expiry of activation links (not tested manually) | automated: valid until the last millisecond of the 24 hours, refused from then on (`apps/erp-api/test/integration/shop-auth-api.int-spec.ts`) | – |
 
 ## 6. Pass/Fail checklist
@@ -423,6 +451,7 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 | B2 | New link replaces the old one | ☐ | ☐ | |
 | B3 | Activation of Anna | ☐ | ☐ | |
 | B4 | Links work only once | ☐ | ☐ | |
+| B5 | Password reset: link once, 4 h, sessions ended, old password refused, link single-use | ☐ | ☐ | |
 | C1 | Generic sign-in failure | ☐ | ☐ | |
 | C1a | E-mail address kept after a failed attempt | ☐ | ☐ | |
 | C2 | Sign in | ☐ | ☐ | |

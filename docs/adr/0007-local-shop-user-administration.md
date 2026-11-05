@@ -58,6 +58,9 @@ sessions (never tokens or hashes) and end one or all of them.
   hash. The Backoffice keeps it only in the state of a dialog: never in
   browser storage, the address bar or a log. A new link replaces an unused
   one.
+- **Password reset links** (added after the acceptance test): for activated
+  users, valid 4 hours, shown once like activation links, kept apart from
+  them; using one ends every session of the user (ADR 0003).
 - **Disabling** ends all sessions at once (database trigger, 12B).
   **Ending sessions** signs browsers out, but the user may sign in again;
   to withdraw access, disable the user.

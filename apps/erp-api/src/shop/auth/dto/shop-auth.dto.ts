@@ -14,6 +14,16 @@ export class LoginDto {
   password: string;
 }
 
+export class ResetPasswordDto {
+  @IsString()
+  @MaxLength(100)
+  token: string;
+
+  @IsString()
+  @MaxLength(1024)
+  password: string;
+}
+
 export class ActivateDto {
   @IsString()
   @MaxLength(100)

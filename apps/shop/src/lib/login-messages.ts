@@ -12,5 +12,6 @@ export const LOGIN_MESSAGES: Record<string, LoginMessage> = {
   request: { kind: "error", text: "For your security, the sign-in could not be completed. Please reload this page and try again." },
   signedOut: { kind: "info", text: "You have been signed out." },
   activated: { kind: "success", text: "Your access is ready. Sign in with your new password." },
+  passwordReset: { kind: "success", text: "Your password has been changed. Sign in with your new password." },
 };
 

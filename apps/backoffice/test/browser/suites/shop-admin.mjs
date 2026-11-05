@@ -232,6 +232,52 @@ export default async function shopAdminSuite({ page, api, urls, sql, shopService
   await detailNotice("enabled again");
   check("Enabled again: signing in works with the existing password", (await shopLogin(ANNA)) !== undefined);
 
+  // ------------------------------------------------------------- reset
+  section("Password reset from the Backoffice (Sprint 12C, GAP-001)");
+  const oldPassword = ANNA.password;
+  const newPassword = "Thermostats click quietly in Stuttgart 31";
+  secrets.push(newPassword);
+  await signIn(ANNA);
+  await arrived("location.pathname === '/account'", "Anna signed in before the reset");
+  const sessionBeforeReset = (await cookieNamed("shop_session")).value;
+  secrets.push(sessionBeforeReset);
+  await openUser(ANNA.email);
+  await evaluate("$action('reset')");
+  await page.waitFor("!!document.querySelector('[aria-labelledby=confirm-dialog-title]')", "reset confirmation");
+  await evaluate("$confirm('Create reset link')");
+  await page.waitFor("document.querySelector('[data-activation-link-dialog]')?.dataset.linkKind === 'reset' && !!document.querySelector('[data-activation-link]')?.value", "reset link shown");
+  const resetLink = await evaluate("document.querySelector('[data-activation-link]').value");
+  const resetToken = new URL(resetLink).hash.slice("#token=".length);
+  secrets.push(resetToken);
+  check("The reset link points to the shop's reset page with the token in its fragment", resetLink.startsWith(`${SHOP}/reset-password#token=`) && /^[A-Za-z0-9_-]{43}$/.test(resetToken));
+  check("The dialog asks for a verified, secure channel", (await evaluate("$text('[data-activation-link-dialog]')")).includes("verified, secure channel"));
+  check("Only the hash is stored, separately from activation links; valid for 4 hours", sql(`SELECT count(*) FROM shop_password_resets WHERE token_hash = encode(sha256('${resetToken}'), 'hex') AND expires_at = created_at + interval '4 hours'`) === "1" && sql(`SELECT count(*) FROM shop_activation_tokens WHERE token_hash = encode(sha256('${resetToken}'), 'hex')`) === "0");
+  await evaluate("document.querySelector('[data-activation-link-done]').click()");
+  await page.waitFor("!document.querySelector('[data-activation-link]') && !!document.querySelector('[data-reset-open]')", "reset link closed");
+  check("After closing, the reset link is gone from the page; its state is shown", !(await evaluate(`document.documentElement.outerHTML.includes(${JSON.stringify(resetToken)})`)));
+  check("Until the link is used, the current password and session stay valid", (await erpAccount(`shop_session=${sessionBeforeReset}`)) === 200);
+
+  await page.goto(`${SHOP}/`, "!!document.querySelector('[data-shop-shell]')");
+  await page.goto(resetLink, "!!document.querySelector('[data-activation-form][data-purpose=reset]')?.offsetParent");
+  check("The reset page removes the token from the address bar", (await evaluate("location.href")) === `${SHOP}/reset-password`);
+  await evaluate(`$setEl(document.getElementById('new-password'), ${JSON.stringify(newPassword)}); $setEl(document.getElementById('confirm-password'), ${JSON.stringify(newPassword)})`);
+  await page.waitFor("!document.querySelector('[data-activation-form] button[type=submit]').disabled", "reset submit enabled");
+  await evaluate("document.querySelector('[data-activation-form] button[type=submit]').click()");
+  await page.waitFor("!!document.querySelector('[data-activation=done]')?.offsetParent", "password reset");
+  check("New password set: confirmation and the way to sign in", (await evaluate("$text('[data-activation=done]')")).includes("signed out everywhere") && (await evaluate("document.querySelector('[data-activation=done] a').getAttribute('href')")) === "/login?reset=1");
+  ANNA.password = newPassword;
+  check("After the reset every earlier session has ended", (await erpAccount(`shop_session=${sessionBeforeReset}`)) === 401 && sql(`SELECT count(*) FROM shop_sessions s JOIN shop_users u ON u.id = s.user_id WHERE u.email = '${ANNA.email}' AND s.revoked_at IS NULL`) === "0");
+  check("The old password no longer works, the new one does", (await shopLogin({ ...ANNA, password: oldPassword })) === undefined && (await shopLogin(ANNA)) !== undefined);
+  await page.goto(`${SHOP}/`, "!!document.querySelector('[data-shop-shell]')");
+  await page.goto(resetLink, "!!document.querySelector('[data-activation-form]')?.offsetParent");
+  await evaluate(`$setEl(document.getElementById('new-password'), 'Another sentence for the third try 2028'); $setEl(document.getElementById('confirm-password'), 'Another sentence for the third try 2028')`);
+  await page.waitFor("!document.querySelector('[data-activation-form] button[type=submit]').disabled", "reuse submit enabled");
+  await evaluate("document.querySelector('[data-activation-form] button[type=submit]').click()");
+  await page.waitFor("!!document.querySelector('[data-activation=invalid]')?.offsetParent", "reset link used");
+  check("The reset link works only once", (await evaluate("$text('[data-activation=invalid]')")).includes("password reset link is invalid") && (await shopLogin(ANNA)) !== undefined);
+  await page.goto(`${SHOP}/login?reset=1`, "!!document.querySelector('[data-login-form]')?.offsetParent");
+  check("The sign-in page confirms the changed password", (await evaluate("$text('[data-notice]')")) === "Your password has been changed. Sign in with your new password.");
+
   section("Account deactivation and reactivation");
   sql("UPDATE customers SET is_active = false WHERE customer_number = 'CUST-1000'");
   check("Inactive account: Ben's open session ends at once", (await erpAccount(benCookie)) === 401);
@@ -285,5 +331,5 @@ export default async function shopAdminSuite({ page, api, urls, sql, shopService
   // The next suite starts without shop users, sessions or cookies
   await page.send("Network.deleteCookies", { name: "shop_session", url: `${SHOP}/` });
   await page.send("Network.deleteCookies", { name: "shop_unit", url: `${SHOP}/` });
-  sql("DELETE FROM shop_sessions; DELETE FROM shop_activation_tokens; DELETE FROM shop_user_credentials; DELETE FROM shop_user_units; DELETE FROM shop_users");
+  sql("DELETE FROM shop_sessions; DELETE FROM shop_password_resets; DELETE FROM shop_activation_tokens; DELETE FROM shop_user_credentials; DELETE FROM shop_user_units; DELETE FROM shop_users");
 }

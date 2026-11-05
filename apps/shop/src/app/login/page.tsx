@@ -31,6 +31,6 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
 async function SignIn({ searchParams }: Pick<PageProps<"/login">, "searchParams">) {
   if (await signedInSession()) redirect("/account");
   const params = await searchParams;
-  const key = typeof params.error === "string" ? params.error : params.signedOut ? "signedOut" : params.activated ? "activated" : null;
+  const key = typeof params.error === "string" ? params.error : params.signedOut ? "signedOut" : params.activated ? "activated" : params.reset ? "passwordReset" : null;
   return <LoginForm initialMessage={key && Object.hasOwn(LOGIN_MESSAGES, key) ? key : null} />;
 }

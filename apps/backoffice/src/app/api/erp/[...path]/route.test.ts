@@ -716,6 +716,7 @@ describe("shop users (Sprint 12C)", () => {
     ["PUT", ["shop-users", USER, "units", "UNIT-STUTTGART"], undefined],
     ["DELETE", ["shop-users", USER, "units", "UNIT-STUTTGART"], undefined],
     ["POST", ["shop-users", USER, "activation-link"], undefined],
+    ["POST", ["shop-users", USER, "password-reset-link"], undefined],
     ["POST", ["shop-users", USER, "sessions", SESSION, "revoke"], undefined],
     ["POST", ["shop-users", USER, "sessions", "revoke-all"], undefined],
   ] as const) {
@@ -751,8 +752,9 @@ describe("shop users (Sprint 12C)", () => {
     });
   }
 
-  it("never reads activation links with GET", async () => {
+  it("never reads activation or reset links with GET", async () => {
     const fetchMock = mockUpstream(upstreamJson(200, {}));
+    assert.equal((await call("GET", ["shop-users", USER, "password-reset-link"])).status, 405);
     const response = await call("GET", ["shop-users", USER, "activation-link"]);
     assert.equal(response.status, 405);
     assert.equal(fetchMock.mock.callCount(), 0);

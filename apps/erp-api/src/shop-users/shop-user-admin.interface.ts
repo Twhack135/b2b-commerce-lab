@@ -72,6 +72,18 @@ export interface ShopUserDetail extends ShopUserSummary {
     /** The current unused link, if any (its token is never shown again) */
     openLink: { createdAt: string; expiresAt: string } | null;
   };
+  /** Password reset (Sprint 12C): the open reset link, if any */
+  passwordReset: {
+    /** When the password was last set (activation or reset) */
+    passwordChangedAt: string | null;
+    openLink: { createdAt: string; expiresAt: string } | null;
+  };
+}
+
+/** The one and only time a password reset link is shown */
+export interface IssuedPasswordResetLink {
+  resetLink: string;
+  expiresAt: string;
 }
 
 /** The one and only time the activation link is shown */

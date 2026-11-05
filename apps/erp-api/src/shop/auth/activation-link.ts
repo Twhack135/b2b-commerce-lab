@@ -39,3 +39,8 @@ export function shopOrigin(value: string | undefined): string | null {
 export function activationLink(origin: string, token: string): string {
   return `${origin}/activate#token=${token}`;
 }
+
+/** A password reset link (Sprint 12C): its own page, the token in the fragment */
+export function passwordResetLink(origin: string, token: string): string {
+  return `${origin}/reset-password#token=${token}`;
+}

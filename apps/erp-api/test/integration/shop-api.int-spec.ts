@@ -100,6 +100,7 @@ describe('Shop API /shop/v1', () => {
       // A new shop route must be added here on purpose
       expect(shopRoutes).toEqual([
         ['post', '/shop/v1/auth/activation'],
+        ['post', '/shop/v1/auth/password-reset'],
         ['post', '/shop/v1/auth/login'],
         ['get', '/shop/v1/auth/session'],
         ['post', '/shop/v1/auth/logout'],

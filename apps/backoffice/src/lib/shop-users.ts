@@ -54,6 +54,11 @@ export type ShopUserDetail = ShopUserSummary & {
     activatedAt: string | null;
     openLink: { createdAt: string; expiresAt: string } | null;
   };
+  /** Password reset (Sprint 12C): the open reset link, if any */
+  passwordReset: {
+    passwordChangedAt: string | null;
+    openLink: { createdAt: string; expiresAt: string } | null;
+  };
 };
 
 export type CreateShopUserInput = {
@@ -65,6 +70,9 @@ export type CreateShopUserInput = {
 
 /** Shown exactly once; never stored by the Backoffice */
 export type IssuedActivationLink = { activationLink: string; expiresAt: string };
+
+/** Shown exactly once; never stored by the Backoffice */
+export type IssuedPasswordResetLink = { resetLink: string; expiresAt: string };
 
 const userPath = (userId: string) => `/shop-users/${encodeURIComponent(userId)}`;
 
@@ -94,6 +102,10 @@ export function unassignShopUserUnit(userId: string, unitId: string) {
 
 export function issueActivationLink(userId: string) {
   return erpFetch<IssuedActivationLink>(`${userPath(userId)}/activation-link`, { method: "POST" });
+}
+
+export function issuePasswordResetLink(userId: string) {
+  return erpFetch<IssuedPasswordResetLink>(`${userPath(userId)}/password-reset-link`, { method: "POST" });
 }
 
 export function revokeShopUserSession(userId: string, sessionId: string) {

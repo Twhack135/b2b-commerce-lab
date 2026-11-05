@@ -14,6 +14,7 @@ import { CreateShopUserDto } from './dto/create-shop-user.dto';
 import { UpdateShopUserDto } from './dto/update-shop-user.dto';
 import {
   IssuedActivationLink,
+  IssuedPasswordResetLink,
   ShopUserDetail,
   ShopUserSummary,
 } from './shop-user-admin.interface';
@@ -84,6 +85,15 @@ export class ShopUsersAdminController {
     @Param('userId') userId: string,
   ): Promise<IssuedActivationLink> {
     return this.service.issueActivationLink(userId);
+  }
+
+  /** A one-time password reset link, shown exactly once; never logged */
+  @Post(':userId/password-reset-link')
+  @Header('Cache-Control', 'no-store')
+  issuePasswordResetLink(
+    @Param('userId') userId: string,
+  ): Promise<IssuedPasswordResetLink> {
+    return this.service.issuePasswordResetLink(userId);
   }
 
   @Post(':userId/sessions/:sessionId/revoke')

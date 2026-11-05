@@ -1,21 +1,35 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { IssuedActivationLink } from "@/lib/shop-users";
 import { formatTimestamp } from "@/lib/shop-user-display";
 
+/** A one-time link of either kind; the dialog only differs in its texts */
+export type OneTimeLink = { kind: "activation" | "reset"; url: string; expiresAt: string };
+
+const TEXTS = {
+  activation: {
+    title: "Activation link for",
+    warning: "Anyone with the link can set the password.",
+  },
+  reset: {
+    title: "Password reset link for",
+    warning:
+      "Anyone with the link can replace the password of this access. Share it only through a verified, secure channel, after confirming that you are talking to the account holder. When it is used, every session of the user ends.",
+  },
+} as const;
+
 /**
- * Shows a new activation link exactly once. The link only lives in the
- * component state of this dialog: it is never written to browser storage,
- * the address bar or a log, and it is gone when the dialog closes. The
- * Backoffice cannot show it again; a new link replaces it.
+ * Shows a new activation or password reset link exactly once. The link
+ * only lives in the component state of this dialog: it is never written to
+ * browser storage, the address bar or a log, and it is gone when the dialog
+ * closes. The Backoffice cannot show it again; a new link replaces it.
  */
 export function ActivationLinkDialog({
   link,
   recipient,
   onClose,
 }: {
-  link: IssuedActivationLink;
+  link: OneTimeLink;
   recipient: { displayName: string; email: string };
   onClose: () => void;
 }) {
@@ -29,7 +43,7 @@ export function ActivationLinkDialog({
 
   async function copyLink() {
     try {
-      await navigator.clipboard.writeText(link.activationLink);
+      await navigator.clipboard.writeText(link.url);
       setCopy("copied");
     } catch {
       // Without clipboard access the text stays selected for Ctrl+C
@@ -46,11 +60,12 @@ export function ActivationLinkDialog({
         aria-modal="true"
         aria-labelledby="activation-link-title"
         data-activation-link-dialog
+        data-link-kind={link.kind}
         className="relative flex max-h-full w-full max-w-xl flex-col rounded-t-lg bg-surface shadow-xl sm:rounded-lg"
       >
         <div className="border-b border-line px-5 py-4">
           <h2 id="activation-link-title" className="text-base font-semibold">
-            Activation link for {recipient.displayName}
+            {TEXTS[link.kind].title} {recipient.displayName}
           </h2>
           <p className="mt-0.5 text-ink-muted">{recipient.email}</p>
         </div>
@@ -58,19 +73,19 @@ export function ActivationLinkDialog({
           <div className="rounded-md border border-warning/30 bg-warning-soft px-4 py-3 text-warning">
             <p className="font-semibold">Shown only this once</p>
             <p className="mt-0.5">
-              Copy the link now and give it to the person through a trusted channel. Anyone with the link can set the
-              password. It works once and expires on {formatTimestamp(link.expiresAt)}.
+              Copy the link now and give it to the person through a trusted channel. {TEXTS[link.kind].warning} It
+              works once and expires on {formatTimestamp(link.expiresAt)}.
             </p>
           </div>
           <label className="block">
-            <span className="mb-1.5 block font-medium">Activation link</span>
+            <span className="mb-1.5 block font-medium">{link.kind === "reset" ? "Password reset link" : "Activation link"}</span>
             <input
               ref={fieldRef}
               readOnly
               type="text"
               autoComplete="off"
               spellCheck={false}
-              value={link.activationLink}
+              value={link.url}
               data-activation-link
               onFocus={(event) => event.target.select()}
               className="w-full rounded-md border border-line bg-canvas px-3 py-2 font-mono text-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"

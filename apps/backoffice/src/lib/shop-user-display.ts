@@ -94,6 +94,14 @@ export function activationBlocker(user: ShopUserDetail): string | null {
   return null;
 }
 
+/** Why a password reset link cannot be created right now, or null */
+export function resetBlocker(user: ShopUserDetail): string | null {
+  if (user.activation !== "ACTIVATED") return "The user has not set a password yet: create an activation link instead.";
+  if (user.status === "DISABLED") return "Enable the user before creating a password reset link.";
+  if (!user.account.isActive) return "The customer account is inactive.";
+  return null;
+}
+
 /** e.g. "2026-11-20 09:00 UTC", the same everywhere in the Backoffice */
 export function formatTimestamp(iso: string): string {
   return `${new Date(iso).toISOString().replace("T", " ").slice(0, 16)} UTC`;

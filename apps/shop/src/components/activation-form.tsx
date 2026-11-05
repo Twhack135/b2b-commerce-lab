@@ -12,9 +12,37 @@ import { inputClass, Notice, primaryButtonClass } from "./auth-panel";
 //
 // Rendered in the browser only (activation-form-loader.tsx): the fragment
 // does not exist on the server.
+//
+// The same form serves the activation (first password) and the password
+// reset (Sprint 12C); only the texts and the route differ. Each link only
+// works for its own purpose: the ERP keeps them in separate tables.
 
-/** Choose the first password with the one-time activation link */
-export function ActivationForm() {
+export type PasswordLinkPurpose = "activation" | "reset";
+
+const TEXTS = {
+  activation: {
+    route: "/api/auth/activate",
+    incomplete: "This activation link is incomplete. Please copy the complete link from your invitation and open it again.",
+    invalid:
+      "This activation link is invalid or has expired. Each link works once and for 24 hours. Please ask your account manager for a new link.",
+    done: "Your password is set. You can now sign in.",
+    signIn: "/login?activated=1",
+    unavailable: "The activation is not available at the moment. Please try again later.",
+  },
+  reset: {
+    route: "/api/auth/password-reset",
+    incomplete: "This password reset link is incomplete. Please copy the complete link and open it again.",
+    invalid:
+      "This password reset link is invalid or has expired. Each link works once and for 4 hours. Please ask your account manager for a new link.",
+    done: "Your new password is set. For your security you have been signed out everywhere; sign in with the new password.",
+    signIn: "/login?reset=1",
+    unavailable: "The password reset is not available at the moment. Please try again later.",
+  },
+} as const;
+
+/** Choose a password with a one-time link: the first one, or a new one */
+export function ActivationForm({ purpose = "activation" }: { purpose?: PasswordLinkPurpose }) {
+  const texts = TEXTS[purpose];
   const [link, setLink] = useState<LinkFragment>(() => parseActivationFragment(window.location.hash));
 
   // Every link that reaches the address bar is removed from it at once
@@ -50,14 +78,12 @@ export function ActivationForm() {
   if (link.kind === "malformed") {
     return (
       <div data-activation="incomplete">
-        <Notice kind="error">
-          This activation link is incomplete. Please copy the complete link from your invitation and open it again.
-        </Notice>
+        <Notice kind="error">{texts.incomplete}</Notice>
       </div>
     );
   }
   // A new link starts with an empty form
-  return <PasswordForm key={link.token} token={link.token} />;
+  return <PasswordForm key={link.token} token={link.token} purpose={purpose} />;
 }
 
 type Status =
@@ -66,7 +92,8 @@ type Status =
   | { kind: "activated" }
   | { kind: "error"; messages: string[]; linkInvalid?: boolean };
 
-function PasswordForm({ token }: { token: string }) {
+function PasswordForm({ token, purpose }: { token: string; purpose: PasswordLinkPurpose }) {
+  const texts = TEXTS[purpose];
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [visible, setVisible] = useState(false);
@@ -75,8 +102,8 @@ function PasswordForm({ token }: { token: string }) {
   if (status.kind === "activated") {
     return (
       <div className="space-y-5" data-activation="done">
-        <Notice kind="success">Your password is set. You can now sign in.</Notice>
-        <Link href="/login?activated=1" className={primaryButtonClass}>
+        <Notice kind="success">{texts.done}</Notice>
+        <Link href={texts.signIn} className={primaryButtonClass}>
           Continue to sign in
         </Link>
       </div>
@@ -85,10 +112,7 @@ function PasswordForm({ token }: { token: string }) {
   if (status.kind === "error" && status.linkInvalid) {
     return (
       <div data-activation="invalid">
-        <Notice kind="error">
-          This activation link is invalid or has expired. Each link works once and for 24 hours.
-          Please ask your account manager for a new link.
-        </Notice>
+        <Notice kind="error">{texts.invalid}</Notice>
       </div>
     );
   }
@@ -102,7 +126,7 @@ function PasswordForm({ token }: { token: string }) {
     event.preventDefault();
     if (blocker || isSubmitting) return;
     setStatus({ kind: "submitting" });
-    const response = await fetch("/api/auth/activate", {
+    const response = await fetch(texts.route, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, password }),
@@ -119,12 +143,12 @@ function PasswordForm({ token }: { token: string }) {
     } else if (body?.status === "locked") {
       setStatus({ kind: "error", messages: ["Too many attempts. Please wait a few minutes and try again."] });
     } else {
-      setStatus({ kind: "error", messages: ["The activation is not available at the moment. Please try again later."] });
+      setStatus({ kind: "error", messages: [texts.unavailable] });
     }
   }
 
   return (
-    <form onSubmit={submit} data-activation-form className="space-y-5" noValidate>
+    <form onSubmit={submit} data-activation-form data-purpose={purpose} className="space-y-5" noValidate>
       {status.kind === "error" && status.messages.length > 0 && (
         <Notice kind="error">
           {status.messages.map((message) => (

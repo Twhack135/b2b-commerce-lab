@@ -14,7 +14,9 @@ import {
   ActivationNotPossibleError,
   InvalidActivationError,
   InvalidCredentialsError,
+  InvalidPasswordResetError,
   PasswordPolicyError,
+  PasswordResetNotPossibleError,
   TooManyAttemptsError,
 } from './shop-auth.errors';
 import { isSessionOpen, SESSION_LIFETIME_MS } from './session-rules';
@@ -24,6 +26,11 @@ const MINUTE = 60_000;
 
 /** An activation link is valid for 24 hours */
 export const ACTIVATION_LIFETIME_MS = 24 * 60 * MINUTE;
+/**
+ * A password reset link for 4 hours (approved after the 12C acceptance
+ * test, also enforced by a CHECK constraint): it opens an existing access
+ */
+export const PASSWORD_RESET_LIFETIME_MS = 4 * 60 * MINUTE;
 export { SESSION_IDLE_MS, SESSION_LIFETIME_MS } from './session-rules';
 /** last_seen_at is written at most once a minute per session */
 const SESSION_TOUCH_MS = MINUTE;
@@ -37,7 +44,10 @@ const SESSION_TOUCH_MS = MINUTE;
 export const LOGIN_LIMIT_PER_EMAIL = 5;
 export const LOGIN_LIMIT_PER_ADDRESS = 30;
 export const LOGIN_LIMIT_UNATTRIBUTED = 50;
-/** Unsuccessful activations per trusted client address, or together */
+/**
+ * Unsuccessful activations per trusted client address, or together; password
+ * resets have counters of their own with the same limits
+ */
 export const ACTIVATION_LIMIT_PER_ADDRESS = 10;
 export const ACTIVATION_LIMIT_UNATTRIBUTED = 20;
 export const ATTEMPT_WINDOW_MS = 15 * MINUTE;
@@ -109,6 +119,8 @@ export class ShopAuthService implements OnModuleInit {
   private readonly activationByAddress: AttemptLimiter;
   private readonly loginUnattributed: AttemptLimiter;
   private readonly activationUnattributed: AttemptLimiter;
+  private readonly resetByAddress: AttemptLimiter;
+  private readonly resetUnattributed: AttemptLimiter;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -136,6 +148,16 @@ export class ShopAuthService implements OnModuleInit {
       now,
     );
     this.activationUnattributed = new AttemptLimiter(
+      ACTIVATION_LIMIT_UNATTRIBUTED,
+      ATTEMPT_WINDOW_MS,
+      now,
+    );
+    this.resetByAddress = new AttemptLimiter(
+      ACTIVATION_LIMIT_PER_ADDRESS,
+      ATTEMPT_WINDOW_MS,
+      now,
+    );
+    this.resetUnattributed = new AttemptLimiter(
       ACTIVATION_LIMIT_UNATTRIBUTED,
       ATTEMPT_WINDOW_MS,
       now,
@@ -250,6 +272,122 @@ export class ShopAuthService implements OnModuleInit {
   }
 
   /**
+   * A new password reset link for an activated, active user of an active
+   * account (Sprint 12C). Replaces an earlier, unused reset link. Only the
+   * local admin API issues it (there is no public "forgot password"); the
+   * raw token is returned once and never stored. The current password stays
+   * valid until the link is used.
+   */
+  async issuePasswordReset(
+    userId: string,
+  ): Promise<{ token: string; expiresAt: Date }> {
+    if (!isUuid(userId)) {
+      throw new PasswordResetNotPossibleError('USER_NOT_FOUND');
+    }
+    const now = this.clock.now();
+    const token = newToken();
+    const expiresAt = new Date(now.getTime() + PASSWORD_RESET_LIFETIME_MS);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM shop_users WHERE id = ${userId}::uuid FOR UPDATE`;
+      const user = await tx.shopUser.findUnique({
+        where: { id: userId },
+        select: {
+          ...SESSION_USER_SELECT,
+          credential: { select: { userId: true } },
+        },
+      });
+      if (!user) throw new PasswordResetNotPossibleError('USER_NOT_FOUND');
+      if (user.status !== 'ACTIVE')
+        throw new PasswordResetNotPossibleError('USER_DISABLED');
+      if (!user.account.customer.isActive)
+        throw new PasswordResetNotPossibleError('ACCOUNT_INACTIVE');
+      if (!user.credential)
+        throw new PasswordResetNotPossibleError('NOT_ACTIVATED');
+      await tx.shopPasswordReset.deleteMany({
+        where: { userId, usedAt: null },
+      });
+      await tx.shopPasswordReset.create({
+        data: {
+          userId,
+          tokenHash: tokenHash(token),
+          createdAt: now,
+          expiresAt,
+        },
+      });
+    });
+    return { token, expiresAt };
+  }
+
+  /**
+   * Sets a new password with a reset link. In one transaction, under row
+   * locks on the link and the user: the link is used up (it works exactly
+   * once), the password is replaced and every session of the user is ended,
+   * so the old password and the old sessions are useless at once. A
+   * disabled user or an inactive account cannot reset; nothing reveals why.
+   */
+  async resetPassword(
+    token: string,
+    password: string,
+    clientAddress?: string,
+  ): Promise<void> {
+    // Counted before the link is checked; a valid link gives the slot back
+    const [limiter, key] = clientAddress
+      ? [this.resetByAddress, clientAddress]
+      : [this.resetUnattributed, UNATTRIBUTED];
+    if (!limiter.acquire(key)) throw new TooManyAttemptsError();
+    const fail = (): never => {
+      throw new InvalidPasswordResetError();
+    };
+    if (!isTokenFormat(token)) fail();
+
+    const now = this.clock.now();
+    const outcome = await this.prisma.$transaction(
+      async (tx) => {
+        const [link] = await tx.$queryRaw<{ id: string; user_id: string }[]>`
+          SELECT id, user_id FROM shop_password_resets
+          WHERE token_hash = ${tokenHash(token)} AND used_at IS NULL AND expires_at > ${now}
+          FOR UPDATE`;
+        if (!link) return 'invalid' as const;
+        // Waits for a sign-in that is creating its session (FOR SHARE), and
+        // makes later sign-ins wait until the new password is stored
+        await tx.$queryRaw`SELECT id FROM shop_users WHERE id = ${link.user_id}::uuid FOR UPDATE`;
+        const user = await tx.shopUser.findUnique({
+          where: { id: link.user_id },
+          select: {
+            ...SESSION_USER_SELECT,
+            credential: { select: { userId: true } },
+          },
+        });
+        if (!user || !mayUseShop(user) || !user.credential)
+          return 'invalid' as const;
+        const problems = passwordProblems(password, user.email);
+        if (problems.length > 0) return { problems };
+        await tx.shopUserCredential.update({
+          where: { userId: user.id },
+          // The time of the application clock, like every other timestamp here
+          data: { passwordHash: await hashPassword(password), updatedAt: now },
+        });
+        await tx.shopPasswordReset.update({
+          where: { id: link.id },
+          data: { usedAt: now },
+        });
+        // Never before the session began (CHECK constraint), as the triggers
+        await tx.$executeRaw`
+          UPDATE shop_sessions SET revoked_at = GREATEST(${now}, created_at)
+           WHERE user_id = ${user.id}::uuid AND revoked_at IS NULL`;
+        return { email: user.email, problems: undefined };
+      },
+      { timeout: 15_000 },
+    );
+    if (outcome === 'invalid') throw new InvalidPasswordResetError();
+    limiter.release(key);
+    if (outcome.problems) throw new PasswordPolicyError(outcome.problems);
+    // The person proved control of the access: earlier failed sign-ins of
+    // the address no longer lock it
+    this.loginByEmail.reset(outcome.email);
+  }
+
+  /**
    * Signs a user in and returns a new session token (for the session
    * cookie). An existing session of the browser is ended first, so a
    * session ID is never reused after sign-in. Every failure is the same.
@@ -305,17 +443,28 @@ export class ShopAuthService implements OnModuleInit {
       // status changes: a deactivation either waits for this sign-in (and
       // its trigger then ends the new session) or this sign-in waits and
       // sees the deactivation. No session can outlive a deactivation.
+      //
+      // The same locks order sign-ins and password resets, which lock the
+      // user FOR UPDATE and replace the credential.
       const [state] = await tx.$queryRaw<
         { status: string; is_active: boolean }[]
       >`
         SELECT u.status::text AS status, c.is_active
           FROM shop_users u
           JOIN customers c ON c.customer_number = u.account_customer_number
+          JOIN shop_user_credentials cr ON cr.user_id = u.id
          WHERE u.id = ${user.id}::uuid
-           FOR SHARE OF u, c`;
+           FOR SHARE OF u, c, cr`;
       if (!state || state.status !== 'ACTIVE' || !state.is_active) {
         return false;
       }
+      // The password checked above must still be the current one, so a
+      // password reset that finished meanwhile is never undone by the old
+      // password. Read in a statement of its own, after the locks are held:
+      // it sees every change committed while this sign-in was waiting.
+      const [current] = await tx.$queryRaw<{ password_hash: string }[]>`
+        SELECT password_hash FROM shop_user_credentials WHERE user_id = ${user.id}::uuid`;
+      if (current?.password_hash !== stored) return false;
       await tx.shopSession.create({
         data: {
           userId: user.id,

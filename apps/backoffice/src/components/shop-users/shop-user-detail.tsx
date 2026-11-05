@@ -9,6 +9,7 @@ import {
   ACTIVATION_LABELS,
   activationBlocker,
   assignableUnits,
+  resetBlocker,
   inactiveUnits,
   formatTimestamp,
   UNIT_ACCESS_LABELS,
@@ -17,11 +18,11 @@ import {
   assignShopUserUnit,
   getShopUser,
   issueActivationLink,
+  issuePasswordResetLink,
   revokeAllShopUserSessions,
   revokeShopUserSession,
   unassignShopUserUnit,
   updateShopUser,
-  type IssuedActivationLink,
   type ShopUserDetail,
   type ShopUserUnitAssignment,
 } from "@/lib/shop-users";
@@ -29,7 +30,7 @@ import { ConfirmDialog } from "../forms/confirm-dialog";
 import { FormErrorAlert, inputClass } from "../forms/form-controls";
 import { SidePanel } from "../forms/side-panel";
 import { LoadError, LoadingRows } from "../list-page";
-import { ActivationLinkDialog } from "./activation-link-dialog";
+import { ActivationLinkDialog, type OneTimeLink } from "./activation-link-dialog";
 import { ToneBadge } from "./badges";
 
 type Confirmation =
@@ -37,6 +38,7 @@ type Confirmation =
   | { kind: "enable" }
   | { kind: "unassign"; unit: ShopUserUnitAssignment }
   | { kind: "activation" }
+  | { kind: "reset" }
   | { kind: "revoke-all" };
 
 /**
@@ -65,7 +67,7 @@ export function ShopUserDetailPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const [issuedLink, setIssuedLink] = useState<IssuedActivationLink | null>(null);
+  const [issuedLink, setIssuedLink] = useState<OneTimeLink | null>(null);
   const [unitToAssign, setUnitToAssign] = useState("");
   const [displayName, setDisplayName] = useState("");
 
@@ -128,10 +130,21 @@ export function ShopUserDetailPanel({
         return run(
           "activation",
           async () => {
-            setIssuedLink(await issueActivationLink(user.id));
+            const issued = await issueActivationLink(user.id);
+            setIssuedLink({ kind: "activation", url: issued.activationLink, expiresAt: issued.expiresAt });
             return getShopUser(user.id);
           },
           "A new activation link was created. An earlier unused link no longer works.",
+        );
+      case "reset":
+        return run(
+          "reset",
+          async () => {
+            const issued = await issuePasswordResetLink(user.id);
+            setIssuedLink({ kind: "reset", url: issued.resetLink, expiresAt: issued.expiresAt });
+            return getShopUser(user.id);
+          },
+          "A password reset link was created. The current password stays valid until the link is used.",
         );
     }
   }
@@ -320,6 +333,40 @@ export function ShopUserDetailPanel({
             </div>
           </Section>
 
+          {/* Password reset (Sprint 12C) */}
+          {user.activation === "ACTIVATED" && (
+            <Section
+              title="Password reset"
+              description="A one-time link with which the person sets a new password. Using it ends every session of the user. There is no self-service reset."
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line px-4 py-3" data-password-reset>
+                <div className="text-xs text-ink-muted">
+                  {user.passwordReset.passwordChangedAt && (
+                    <p>Password last set on {formatTimestamp(user.passwordReset.passwordChangedAt)}</p>
+                  )}
+                  {user.passwordReset.openLink ? (
+                    <p data-reset-open>
+                      Reset link created {formatTimestamp(user.passwordReset.openLink.createdAt)}, valid until{" "}
+                      {formatTimestamp(user.passwordReset.openLink.expiresAt)}
+                    </p>
+                  ) : (
+                    <p>No open reset link.</p>
+                  )}
+                  {resetBlocker(user) && <p>{resetBlocker(user)}</p>}
+                </div>
+                <button
+                  type="button"
+                  data-action="reset"
+                  disabled={isBusy || resetBlocker(user) !== null}
+                  onClick={() => setConfirmation({ kind: "reset" })}
+                  className="rounded-md border border-line bg-surface px-3 py-1.5 font-medium hover:bg-canvas disabled:opacity-50"
+                >
+                  {busy === "reset" ? "Creating…" : "Create password reset link"}
+                </button>
+              </div>
+            </Section>
+          )}
+
           {/* Sessions */}
           <Section title="Signed-in sessions" description="Browsers in which the user is signed in right now. Ending a session signs that browser out at its next request.">
             {user.sessions.length === 0 ? (
@@ -384,6 +431,7 @@ const CONFIRMATIONS: Record<Confirmation["kind"], { title: string; confirm: stri
   enable: { title: "Enable shop user?", confirm: "Enable user" },
   unassign: { title: "Remove B2B unit?", confirm: "Remove unit" },
   activation: { title: "Create activation link?", confirm: "Create link" },
+  reset: { title: "Create password reset link?", confirm: "Create reset link" },
   "revoke-all": { title: "End all sessions?", confirm: "End all sessions" },
 };
 
@@ -399,6 +447,8 @@ function confirmationText(confirmation: Confirmation, user: ShopUserDetail): str
       return user.activationDetails.openLink
         ? "A new one-time link is created and shown once. The earlier unused link stops working."
         : "A one-time link is created and shown once. It is valid for 24 hours.";
+    case "reset":
+      return `A one-time link for a new password is created and shown once; it is valid for 4 hours. ${user.displayName} keeps the current password until the link is used; then every session ends. Share it only through a verified, secure channel.`;
     case "revoke-all":
       return `Every browser of ${user.displayName} is signed out at its next request. Signing in again stays possible; to block access, disable the user.`;
   }

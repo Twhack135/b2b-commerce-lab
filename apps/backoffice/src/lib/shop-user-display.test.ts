@@ -5,6 +5,7 @@ import type { CustomerAccount } from "./customer-accounts.ts";
 import {
   accountChoices,
   activationBlocker,
+  resetBlocker,
   assignableUnits,
   filterCounts,
   filterShopUsers,
@@ -104,6 +105,18 @@ describe("activationBlocker", () => {
       activationBlocker(detail({ account: { customerNumber: "CUST-1000", name: "M", isActive: false } })) ?? "",
       /inactive/,
     );
+  });
+});
+
+describe("resetBlocker", () => {
+  const detail = (overrides: Partial<ShopUserDetail>) =>
+    ({ ...user({}), units: [], sessions: [], activationDetails: { activatedAt: null, openLink: null }, passwordReset: { passwordChangedAt: null, openLink: null }, ...overrides }) as ShopUserDetail;
+
+  it("allows a reset only for an activated, enabled user of an active account", () => {
+    assert.equal(resetBlocker(detail({})), null);
+    assert.match(resetBlocker(detail({ activation: "LINK_OPEN" })) ?? "", /activation link instead/);
+    assert.match(resetBlocker(detail({ status: "DISABLED" })) ?? "", /Enable the user/);
+    assert.match(resetBlocker(detail({ account: { customerNumber: "CUST-1000", name: "M", isActive: false } })) ?? "", /inactive/);
   });
 });
 

@@ -21,6 +21,7 @@ type ShopApiPath =
   | "/shop/v1/health"
   | "/shop/v1/auth/login"
   | "/shop/v1/auth/activation"
+  | "/shop/v1/auth/password-reset"
   | "/shop/v1/auth/logout"
   | "/shop/v1/account";
 
@@ -143,6 +144,25 @@ export async function activate(input: {
   clientAddress?: string;
 }): Promise<{ ok: true } | { ok: false; failure: AuthFailure | "password"; messages: string[] }> {
   const answer = await callShopApi("/shop/v1/auth/activation", {
+    method: "POST",
+    body: { token: input.token, password: input.password },
+    clientAddress: input.clientAddress,
+  });
+  if (answer.status === 204) return { ok: true };
+  const body = answer.body as { code?: unknown; message?: unknown } | null;
+  if (answer.status === 400 && body?.code === "PASSWORD_POLICY" && Array.isArray(body.message)) {
+    return { ok: false, failure: "password", messages: body.message.filter((m): m is string => typeof m === "string") };
+  }
+  return { ok: false, failure: failureOf(answer.status), messages: [] };
+}
+
+/** A new password with a reset link (Sprint 12C); the same answers as activate */
+export async function resetPassword(input: {
+  token: string;
+  password: string;
+  clientAddress?: string;
+}): Promise<{ ok: true } | { ok: false; failure: AuthFailure | "password"; messages: string[] }> {
+  const answer = await callShopApi("/shop/v1/auth/password-reset", {
     method: "POST",
     body: { token: input.token, password: input.password },
     clientAddress: input.clientAddress,
