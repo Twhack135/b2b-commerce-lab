@@ -133,6 +133,7 @@ model SalesArea {
   b2bUnits            B2bUnit[]
   priceConditions     PriceCondition[]
   salesOrders         SalesOrder[]
+  pricingProcedureDeterminations PricingProcedureDetermination[]
 
   @@id([salesOrganization, distributionChannel, division])
   @@index([distributionChannel])
@@ -343,6 +344,8 @@ model ConditionTypeScope {
 
   conditionType   ConditionType    @relation(fields: [conditionTypeCode], references: [code], onDelete: Restrict, onUpdate: Restrict)
   priceConditions PriceCondition[]
+  // Accesses of access sequences that read this kind of record (Sprint 13A)
+  accesses        AccessSequenceAccess[]
 
   @@id([conditionTypeCode, scope])
   @@map("condition_type_scopes")
@@ -452,6 +455,124 @@ enum SalesOrderShippingMethod {
   EXPRESS
 
   @@map("requested_shipping_method")
+}
+
+// ---------------------------------------------------------------------------
+// Pricing procedures (Sprint 13A, docs/adr/0008), comparable to the SAP SD
+// pricing configuration: access sequences (which condition records are
+// searched, in which order), pricing procedures (which steps a price
+// consists of) and their determination per sales area. Configuration only,
+// versioned through migrations; the calculation is a pure function
+// (src/pricing/engine).
+// ---------------------------------------------------------------------------
+
+/// What a step of a pricing procedure does
+enum PricingStepKind {
+  /// Reads condition records through an access sequence
+  CONDITION
+  /// Adds up the values of earlier steps (e.g. the net value)
+  SUBTOTAL
+
+  @@map("pricing_step_kind")
+}
+
+/// An ordered search for condition records (comparable to an SAP access
+/// sequence). The first access that finds a valid record wins.
+model AccessSequence {
+  code String @id @db.VarChar(4)
+  name String @db.VarChar(60)
+
+  accesses AccessSequenceAccess[]
+  steps    PricingProcedureStep[]
+
+  @@map("access_sequences")
+}
+
+/// One access: records of one condition type on one level (scope). Only
+/// combinations allowed for condition records (condition_type_scopes).
+model AccessSequenceAccess {
+  accessSequenceCode String              @map("access_sequence_code") @db.VarChar(4)
+  accessNumber       Int                 @map("access_number")
+  conditionTypeCode  String              @map("condition_type_code") @db.VarChar(4)
+  scope              PriceConditionScope
+  /// The record must be for the material of the item. Material-independent
+  /// accesses (e.g. a customer discount on everything) follow in Sprint 13B.
+  materialSpecific   Boolean             @default(true) @map("material_specific")
+
+  accessSequence     AccessSequence     @relation(fields: [accessSequenceCode], references: [code], onDelete: Restrict, onUpdate: Restrict, map: "access_sequence_accesses_sequence_fkey")
+  conditionTypeScope ConditionTypeScope @relation(fields: [conditionTypeCode, scope], references: [conditionTypeCode, scope], onDelete: Restrict, onUpdate: Restrict, map: "access_sequence_accesses_condition_type_scope_fkey")
+
+  @@id([accessSequenceCode, accessNumber])
+  @@unique([accessSequenceCode, conditionTypeCode, scope], map: "access_sequence_accesses_type_scope_key")
+  @@index([conditionTypeCode, scope], map: "access_sequence_accesses_condition_type_scope_idx")
+  @@map("access_sequence_accesses")
+}
+
+/// A pricing procedure (comparable to an SAP pricing procedure), e.g.
+/// ZDE001 for Germany. Every change of its configuration is a migration that
+/// raises the revision; results name the revision they were calculated with.
+model PricingProcedure {
+  code      String   @id @db.VarChar(6)
+  name      String   @db.VarChar(60)
+  revision  Int
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  steps          PricingProcedureStep[]
+  determinations PricingProcedureDetermination[]
+
+  @@map("pricing_procedures")
+}
+
+/// A step of a pricing procedure, calculated in the order of step_number
+model PricingProcedureStep {
+  procedureCode      String          @map("procedure_code") @db.VarChar(6)
+  stepNumber         Int             @map("step_number")
+  kind               PricingStepKind
+  label              String          @db.VarChar(60)
+  /// CONDITION: the access sequence that finds the condition record
+  accessSequenceCode String?         @map("access_sequence_code") @db.VarChar(4)
+  /// Calculation base (SUBTOTAL; later the base of percentage conditions):
+  /// the values of the steps from_step..to_step
+  fromStep           Int?            @map("from_step")
+  toStep             Int?            @map("to_step")
+  /// Shown and explained, but not part of any value (e.g. the list price
+  /// next to a customer price)
+  isStatistical      Boolean         @default(false) @map("is_statistical")
+  /// Without a valid record the item is incomplete and has no price
+  isMandatory        Boolean         @default(false) @map("is_mandatory")
+  /// SUBTOTAL: the name of the value, e.g. NET_VALUE
+  subtotalKey        String?         @map("subtotal_key") @db.VarChar(20)
+  /// May appear in a future customer-facing price view (docs/adr/0005)
+  customerVisible    Boolean         @default(false) @map("customer_visible")
+
+  procedure      PricingProcedure @relation(fields: [procedureCode], references: [code], onDelete: Restrict, onUpdate: Restrict, map: "pricing_procedure_steps_procedure_fkey")
+  accessSequence AccessSequence?  @relation(fields: [accessSequenceCode], references: [code], onDelete: Restrict, onUpdate: Restrict, map: "pricing_procedure_steps_access_sequence_fkey")
+
+  @@id([procedureCode, stepNumber])
+  @@unique([procedureCode, subtotalKey], map: "pricing_procedure_steps_subtotal_key")
+  @@index([accessSequenceCode], map: "pricing_procedure_steps_access_sequence_idx")
+  @@map("pricing_procedure_steps")
+}
+
+/// Which pricing procedure a sales area uses (comparable to SAP procedure
+/// determination). customer_procedure '*' applies to every customer; a
+/// customer-specific key (e.g. for tax-exempt customers) can be added later
+/// next to it without changing this table.
+model PricingProcedureDetermination {
+  salesOrganization   String @map("sales_organization") @db.Char(4)
+  distributionChannel String @map("distribution_channel") @db.Char(2)
+  division            String @db.Char(2)
+  customerProcedure   String @default("*") @map("customer_procedure") @db.Char(1)
+  procedureCode       String @map("procedure_code") @db.VarChar(6)
+
+  salesArea SalesArea        @relation(fields: [salesOrganization, distributionChannel, division], references: [salesOrganization, distributionChannel, division], onDelete: Restrict, onUpdate: Restrict, map: "pricing_procedure_determinations_sales_area_fkey")
+  procedure PricingProcedure @relation(fields: [procedureCode], references: [code], onDelete: Restrict, onUpdate: Restrict, map: "pricing_procedure_determinations_procedure_fkey")
+
+  @@id([salesOrganization, distributionChannel, division, customerProcedure])
+  @@index([procedureCode], map: "pricing_procedure_determinations_procedure_idx")
+  @@map("pricing_procedure_determinations")
 }
 
 model SalesOrder {

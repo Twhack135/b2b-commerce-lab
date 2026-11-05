@@ -9,6 +9,7 @@ import { CustomersModule } from './customers/customers.module';
 import { MaterialsModule } from './materials/materials.module';
 import { PriceConditionsModule } from './price-conditions/price-conditions.module';
 import { PricingModule } from './pricing/pricing.module';
+import { PricingProceduresModule } from './pricing-procedures/pricing-procedures.module';
 import { SalesAreasModule } from './sales-areas/sales-areas.module';
 import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 import { ShopModule } from './shop/shop.module';
@@ -25,6 +26,8 @@ import { ShopUsersAdminModule } from './shop-users/shop-users-admin.module';
     ConditionTypesModule,
     PriceConditionsModule,
     PricingModule,
+    // Pricing procedures and access sequences (Sprint 13A, read-only)
+    PricingProceduresModule,
     SalesOrdersModule,
     // Local administration of shop users (admin API, Sprint 12C)
     ShopUsersAdminModule,
