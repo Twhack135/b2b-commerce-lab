@@ -1,23 +1,28 @@
-import {
-  CurrencyPrecision,
-  Decimal,
-  fitsCurrency,
-  roundToCurrency,
-} from '../common/money';
+import { CurrencyPrecision, Decimal, roundToCurrency } from '../common/money';
 import { ConditionTypeSummary } from '../condition-types/condition-type.interface';
 import { PriceConditionScope } from '../generated/prisma/enums';
+import { SalesAreaKey } from '../sales-areas/sales-area-key';
 import {
-  formatSalesArea,
-  SalesAreaKey,
-  sameSalesArea,
-} from '../sales-areas/sales-area-key';
+  Access,
+  assertInSalesArea,
+  ConditionCandidate,
+  evaluateAccessSequence,
+} from './engine/access-sequence';
 
-// Price determination without database access, so every rule can be tested
-// directly. Comparable to an SAP access sequence for prices: the levels below
-// decide which price is used; the condition type of a record (e.g. ZP01,
-// ZP02) is carried along as metadata and does not change the precedence. A
-// future pricing procedure will combine several condition types (list
-// price, discounts, freight, tax) in one calculation.
+export { isValidOn } from './engine/access-sequence';
+export type { ConditionCandidate } from './engine/access-sequence';
+
+// The released base price determination (POST /pricing/price, the order
+// simulation and order creation), without database access. Comparable to an
+// SAP access sequence for prices: the levels below decide which price is
+// used; the condition type of a record (e.g. ZP01, ZP02) is carried along as
+// metadata and does not change the precedence.
+//
+// Since Sprint 13A it runs on the shared access sequence evaluation
+// (engine/access-sequence.ts) with one access per level for any price
+// condition type, which is exactly the released behavior (regression
+// fixtures: price-determination.regression.spec.ts). The pricing procedures
+// use the same evaluation with their own access sequences (e.g. ZBP1).
 //
 // Prices are determined in exactly one sales area and its currency. There is
 // no currency conversion: a condition of another sales area or currency is
@@ -32,24 +37,14 @@ export const ACCESS_SEQUENCE: readonly PriceConditionScope[] = [
   PriceConditionScope.SALES_AREA,
 ];
 
-/**
- * A stored condition that may apply: same sales area and material, and
- * the unit, its Sold-to or no key (list price of the sales area)
- */
-export interface ConditionCandidate {
-  conditionId: number;
-  scope: PriceConditionScope;
-  salesArea: SalesAreaKey;
-  amount: Decimal;
-  currency: string;
-  /** YYYY-MM-DD, inclusive */
-  validFrom: string;
-  /** YYYY-MM-DD, inclusive; null means open-ended */
-  validTo: string | null;
-  isActive: boolean;
-  /** Metadata only; the condition type does not change the precedence */
-  conditionType?: ConditionTypeSummary;
-}
+/** The levels as accesses for any price condition type */
+const LEVEL_ACCESSES: readonly Access[] = ACCESS_SEQUENCE.map(
+  (scope, index) => ({
+    accessNumber: (index + 1) * 10,
+    scope,
+    conditionTypeCode: null,
+  }),
+);
 
 export interface DeterminationInput {
   /** YYYY-MM-DD */
@@ -97,15 +92,6 @@ export interface UnpricedDetermination {
 
 export type Determination = PricedDetermination | UnpricedDetermination;
 
-export function isValidOn(condition: ConditionCandidate, date: string) {
-  // YYYY-MM-DD texts compare like dates
-  return (
-    condition.isActive &&
-    condition.validFrom <= date &&
-    (condition.validTo === null || date <= condition.validTo)
-  );
-}
-
 /**
  * Determines the price: the valid B2B unit condition, else the valid Sold-to
  * condition, else the valid list price of the sales area. Without any of
@@ -117,48 +103,21 @@ export function isValidOn(condition: ConditionCandidate, date: string) {
  * the services prevent all of these; a failure means a programming error.
  */
 export function determinePrice(input: DeterminationInput): Determination {
-  const area = formatSalesArea(input.salesArea);
-  for (const candidate of input.candidates) {
-    if (!sameSalesArea(candidate.salesArea, input.salesArea)) {
-      throw new Error(
-        `Price condition ${candidate.conditionId} belongs to sales area ${formatSalesArea(candidate.salesArea)}, not ${area}`,
-      );
-    }
-  }
-
-  const steps: PricingStep[] = [];
-  let winner: ConditionCandidate | null = null;
-
-  for (const scope of ACCESS_SEQUENCE) {
-    const valid = input.candidates.filter(
-      (c) => c.scope === scope && isValidOn(c, input.pricingDate),
-    );
-    if (valid.length > 1) {
-      const ids = valid.map((c) => c.conditionId).join(', ');
-      throw new Error(
-        `Price conditions ${ids} (${scope}) are all valid on ${input.pricingDate}`,
-      );
-    }
-    const match = valid[0] ?? null;
-    if (match && match.currency !== input.currency.code) {
-      throw new Error(
-        `Price condition ${match.conditionId} uses ${match.currency}, but sales area ${area} uses ${input.currency.code}`,
-      );
-    }
-    if (match && !fitsCurrency(match.amount, input.currency)) {
-      throw new Error(
-        `Price condition ${match.conditionId} has more decimal places than ${input.currency.code} allows`,
-      );
-    }
-    steps.push({
-      source: scope,
-      conditionId: match?.conditionId ?? null,
-      amount: match?.amount ?? null,
-      applied: match !== null && winner === null,
-      conditionType: match?.conditionType ?? null,
-    });
-    winner ??= match;
-  }
+  assertInSalesArea(input.candidates, input.salesArea);
+  const { winner, outcomes } = evaluateAccessSequence({
+    accesses: LEVEL_ACCESSES,
+    candidates: input.candidates,
+    pricingDate: input.pricingDate,
+    salesArea: input.salesArea,
+    currency: input.currency,
+  });
+  const steps: PricingStep[] = outcomes.map(({ access, match, applied }) => ({
+    source: access.scope,
+    conditionId: match?.conditionId ?? null,
+    amount: match?.amount ?? null,
+    applied,
+    conditionType: match?.conditionType ?? null,
+  }));
 
   if (!winner) {
     return { status: 'NO_PRICE_FOUND', currency: input.currency.code, steps };
