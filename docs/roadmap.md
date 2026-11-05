@@ -70,6 +70,12 @@ unit (cart changes, simulation for ordering, checkout).
 
 ## R4 – Pricing procedures (SAP-inspired) for DE, PL and JP
 
+**Status:** foundation implemented in Sprint 13A (docs/adr/0008): access
+sequences, procedures ZDE001/ZPL001/ZJP001 with base price, statistical list
+price and net value, determination per sales area, `POST /pricing/calculate`
+next to the released pricing. Discounts and surcharges follow in 13B, taxes,
+freight and totals in 13C, the orders in Sprint 14.
+
 - A **pricing procedure** per sales area (procedure determination by
   sales area, customer pricing procedure and document type), versioned and
   configured, not coded: ordered steps with condition types, subtotal
@@ -82,11 +88,13 @@ unit (cart changes, simulation for ordering, checkout).
 
 ## R5 – Exclusive base price from the existing precedence
 
-- Exactly **one base price** per item, chosen by the existing condition
-  precedence (access sequence): ZP03 special price, ZP02 unit price, ZP02
-  Sold-to price, ZP01 list price, first found wins. Base prices never stack.
-- The current price determination becomes the first procedure step, so
-  today's results remain identical (ground rules).
+- Exactly **one base price** per item: access sequence ZBP1 (approved for
+  Sprint 13A): ZP03 B2B unit, ZP02 B2B unit, ZP03 Sold-to, ZP02 Sold-to,
+  ZP01 list price; the first valid record wins. The level order of the
+  released price determination (B2B unit, Sold-to, sales area) is kept;
+  within a level ZP03 comes before ZP02. Base prices never stack.
+- **Status:** implemented in Sprint 13A (docs/adr/0008); same results as the
+  released determination for all current data (comparison tests).
 
 ## R6 – Configurable discounts, surcharges, taxes, shipping and subtotals
 

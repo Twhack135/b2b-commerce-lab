@@ -100,6 +100,13 @@ const ALLOWED_ROUTES: Route[] = [
   { method: "PATCH", path: ["b2b-units", ":unitId"] },
   // Read-only condition type configuration
   { method: "GET", path: ["condition-types"] },
+  // Read-only pricing procedures (Sprint 13A); configuration through migrations
+  { method: "GET", path: ["pricing-procedures"] },
+  {
+    method: "GET",
+    path: ["pricing-procedures", ":code"],
+    params: { code: /^[A-Z][A-Z0-9]{1,5}$/ },
+  },
   { method: "GET", path: ["price-conditions"] },
   { method: "GET", path: ["price-conditions", ":conditionId"] },
   { method: "POST", path: ["price-conditions"] },

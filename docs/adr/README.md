@@ -13,5 +13,6 @@ later sprints**; nothing in the "future" sections exists yet.
 | [0005](0005-internal-and-customer-api-contracts.md) | Internal versus customer-facing API contracts | Accepted |
 | [0006](0006-local-development-security.md) | Local development security and deployment restrictions | Accepted |
 | [0007](0007-local-shop-user-administration.md) | Local shop user administration and unit selection | Implemented (Sprint 12C) |
+| [0008](0008-pricing-procedures-and-access-sequences.md) | Pricing procedures and access sequences | Foundation implemented (Sprint 13A) |
 
 Decided direction for later sprints (not implemented): [docs/roadmap.md](../roadmap.md).

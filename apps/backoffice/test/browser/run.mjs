@@ -29,6 +29,7 @@ import {
   assertTestPorts,
   serviceEnvironment,
 } from "./lib/safety.mjs";
+import pricingProceduresSuite from "./suites/pricing-procedures.mjs";
 import salesOrderOverviewSuite, { emptyOverviewSuite } from "./suites/sales-order-overview.mjs";
 import salesOrderSuite from "./suites/sales-orders.mjs";
 import shopAdminSuite from "./suites/shop-admin.mjs";
@@ -40,6 +41,7 @@ const SUITES = [
   ["Sales order overview: no orders yet (Sprint 10D-B)", emptyOverviewSuite],
   ["Sales orders (Sprint 10C)", salesOrderSuite],
   ["Sales order overview (Sprint 10D-B)", salesOrderOverviewSuite],
+  ["Pricing procedures (Sprint 13A)", pricingProceduresSuite],
   ["Shop foundation (Sprint 11)", shopFoundationSuite],
   // Before the sign-in suite: that one locks sign-ins without a trusted
   // client address for the rest of the run; this one removes its users

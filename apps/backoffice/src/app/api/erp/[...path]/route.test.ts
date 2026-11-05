@@ -814,3 +814,30 @@ describe("local-only boundary (Sprint 12C)", () => {
     }
   });
 });
+
+describe("pricing procedures (Sprint 13A)", () => {
+  it("forwards the read-only list and detail", async () => {
+    for (const path of [["pricing-procedures"], ["pricing-procedures", "ZDE001"]]) {
+      const fetchMock = mockUpstream(upstreamJson(200, {}));
+      assert.equal((await call("GET", path)).status, 200);
+      assert.equal(upstreamCall(fetchMock).url, `http://erp.test:3000/${path.join("/")}`);
+      mock.restoreAll();
+    }
+  });
+
+  it("offers no changes and checks the procedure code", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, {}));
+    assert.equal((await call("POST", ["pricing-procedures"], {})).status, 405);
+    assert.equal((await call("PATCH", ["pricing-procedures", "ZDE001"], {})).status, 405);
+    for (const code of ["zde001", "ZDE0011", "Z", "ZDE-01"]) {
+      assert.equal((await call("GET", ["pricing-procedures", code])).status, 404, code);
+    }
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("does not forward the document pricing yet (interactive view follows in 13B)", async () => {
+    const fetchMock = mockUpstream(upstreamJson(200, {}));
+    assert.equal((await call("POST", ["pricing", "calculate"], {})).status, 404);
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+});

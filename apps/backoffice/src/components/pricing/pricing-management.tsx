@@ -36,6 +36,7 @@ import { PriceCheckPanel } from "./price-check-panel";
 import { PriceConditionForm } from "./price-condition-form";
 import { ConditionTypesOverview } from "./condition-types-overview";
 import { PriceConditionTable } from "./price-condition-table";
+import { PricingProceduresOverview } from "./pricing-procedures-overview";
 
 type Panel =
   | { kind: "create" }
@@ -270,6 +271,8 @@ export function PricingManagement() {
         types={conditionTypes.items}
         loadError={conditionTypes.loadError}
       />
+
+      <PricingProceduresOverview />
 
       {(panel?.kind === "create" || panel?.kind === "edit") && (
         <PriceConditionForm
