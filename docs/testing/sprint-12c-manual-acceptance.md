@@ -437,6 +437,28 @@ Backoffice (`http://127.0.0.1:3311`), "Shop" means `http://127.0.0.1:3313`.
 | GAP-001 password reset for activated users | added: administrator-issued reset link, 4 hours, ends all sessions (no public "forgot password") | B5 (replaces the skipped test 10) |
 | 24-hour expiry of activation links (not tested manually) | automated: valid until the last millisecond of the 24 hours, refused from then on (`apps/erp-api/test/integration/shop-auth-api.int-spec.ts`) | – |
 
+### Manual follow-up acceptance (commits `62b93d0`, `fe9e702`)
+
+Executed in the disposable acceptance environment. The numbering A1–A6 is
+the one of the follow-up run, not the test case IDs of section 4.
+
+| Follow-up | Test case | Manual result |
+| --------- | --------- | ------------- |
+| A1 "Open Shop" | A6 | **Passed** |
+| A2 Keep the e-mail address after a failed sign-in | C1a | **Passed** |
+| A3 Inactive B2B unit shown as not assignable | E2 step 3 | **Passed** |
+| A4 Creating a password reset link (shown once) | B5 steps 1–3 | **Passed** |
+| A5 Password reset and the end of all sessions | B5 steps 4–7 | **Not explicitly confirmed** – open |
+| A6 Replaying a used reset link | B5 step 8 | **Not executed manually** – open |
+
+A5 and A6 are covered by automated tests only (not a substitute for the
+manual acceptance): `apps/erp-api/test/integration/shop-password-reset.int-spec.ts`
+(new password, old password refused, every session ended, single use, 4-hour
+expiry, activation and reset links kept apart, concurrent sign-in during a
+reset) and the browser suite "Password reset from the Backoffice" in
+`apps/backoffice/test/browser/suites/shop-admin.mjs`. To close them, run B5
+steps 4–8 again and record the result here.
+
 ## 6. Pass/Fail checklist
 
 | ID | Test case | Pass | Fail | Note |
