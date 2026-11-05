@@ -11,10 +11,12 @@ import { inputClass, Notice, primaryButtonClass } from "./auth-panel";
  * after a failed attempt the e-mail address stays in the field and only the
  * password is cleared; the address is never put into the URL, a cookie or
  * browser storage. The server route and its checks are the same either way.
+ *
+ * The fields are uncontrolled on purpose: what a person types before the
+ * page is hydrated stays in the fields. Controlled fields were reset to
+ * their empty state by the hydration, and the sign-in then did nothing.
  */
 export function LoginForm({ initialMessage }: { initialMessage: string | null }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [message, setMessage] = useState<LoginMessage | undefined>(initialMessage ? LOGIN_MESSAGES[initialMessage] : undefined);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
@@ -22,16 +24,16 @@ export function LoginForm({ initialMessage }: { initialMessage: string | null })
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isSubmitting) return;
+    const form = new FormData(event.currentTarget);
     setIsSubmitting(true);
     const response = await fetch("/api/auth/login", {
       method: "POST",
-      body: new URLSearchParams({ email, password }),
+      body: new URLSearchParams({ email: String(form.get("email") ?? ""), password: String(form.get("password") ?? "") }),
     }).catch(() => null);
     const result = loginResult(response?.url ?? null, window.location.origin);
     if (result.kind === "signed-in") {
       // A full page load after signing in: the header (shared layout), the
-      // client router cache and every page see the new session. A client
-      // navigation plus refresh raced in tests and could stay on /login.
+      // client router cache and every page see the new session
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.assign("/account");
       return;
@@ -39,7 +41,7 @@ export function LoginForm({ initialMessage }: { initialMessage: string | null })
     // As after the plain form: the reason in the address (never the e-mail)
     window.history.replaceState(window.history.state, "", `/login?error=${result.reason}`);
     setMessage(LOGIN_MESSAGES[result.reason]);
-    setPassword("");
+    if (passwordRef.current) passwordRef.current.value = "";
     setIsSubmitting(false);
     passwordRef.current?.focus();
   }
@@ -59,8 +61,6 @@ export function LoginForm({ initialMessage }: { initialMessage: string | null })
           maxLength={320}
           autoComplete="username"
           autoFocus
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
           className={inputClass}
         />
       </div>
@@ -76,8 +76,6 @@ export function LoginForm({ initialMessage }: { initialMessage: string | null })
           required
           maxLength={1024}
           autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
           className={inputClass}
         />
       </div>

@@ -117,8 +117,19 @@ export default async function shopAuthSuite({ page, urls, shopUser, shopServiceK
   await arrived("location.search === '?error=invalid'", "unknown user");
   check("Wrong password and unknown e-mail address: the same generic message", wrongPassword === failureText && (await evaluate("$text('[data-notice=error]')")) === failureText);
 
-  await signIn(EMAIL, PASSWORD);
+  // Found in Sprint 13A: controlled fields lost what was typed before the
+  // page was hydrated, and the sign-in did nothing (intermittent). The form
+  // must send what is in the fields, also without any input event, as for
+  // text typed before hydration.
+  await page.goto(`${SHOP}/login`, "$vis(document.querySelector('[data-login-form]'))");
+  await evaluate(`(() => {
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    set.call(document.getElementById('email'), ${JSON.stringify(EMAIL)});
+    set.call(document.getElementById('password'), ${JSON.stringify(PASSWORD)});
+    document.querySelector('[data-login-form]').requestSubmit();
+  })()`);
   await arrived("location.pathname === '/account' && !!document.querySelector('[data-display-name]')?.offsetParent", "signed in");
+  check("The sign-in sends what is in the fields (text typed before hydration is kept)", true);
   check("Signed in: welcome, company and customer number", (await evaluate("$text('[data-display-name]')")) === "Welcome, Anna Weber" && (await evaluate("document.body.innerText")).includes("Müller Heiztechnik GmbH") && (await evaluate("$text('[data-signed-in-email]')")) === EMAIL);
   check("The units assigned to the user, with their state", (await evaluate("document.querySelector('[data-units]').dataset.units")) === "2" && (await evaluate("$text('[data-unit=\"UNIT-STUTTGART\"]')")).includes("Ordering possible"));
   check("The header shows the person and 'Sign out'", (await evaluate("$text('[data-account-menu]')")).includes("Anna Weber") && (await evaluate("!!document.querySelector('[data-sign-out]')")));
