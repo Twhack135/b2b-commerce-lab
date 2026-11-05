@@ -58,21 +58,7 @@ export class PricingService {
     if (!material) {
       violations.push(`materialNumber ${dto.materialNumber} does not exist`);
     }
-    violations.push(...salesAreaViolations(key, salesArea));
-    if (!unit) {
-      violations.push(`unitId ${dto.unitId} does not exist`);
-    } else {
-      if (!unit.isActive) violations.push(`unitId ${dto.unitId} is inactive`);
-      if (!unit.soldTo.customer.isActive) {
-        violations.push(
-          `unitId ${dto.unitId} has an inactive Sold-to ${unit.soldToCustomerNumber}`,
-        );
-      }
-      // Never price a unit with the conditions of another market
-      if (salesArea && !sameSalesArea(unit, key)) {
-        violations.push(unitNotInSalesArea(dto.unitId, unit, key));
-      }
-    }
+    violations.push(...unitPricingViolations(key, salesArea, dto.unitId, unit));
     if (!material || !unit || !salesArea || violations.length > 0) {
       throw new UnprocessableEntityException(violations);
     }
@@ -185,7 +171,7 @@ export class PricingService {
   }
 }
 
-type Db = Prisma.TransactionClient | PrismaService;
+export type Db = Prisma.TransactionClient | PrismaService;
 
 /** Result of priceItems for one position, in request order */
 export interface ItemPricing {
@@ -193,6 +179,65 @@ export interface ItemPricing {
   material: Material | null;
   /** null without material, unit or sales area */
   determination: Determination | null;
+}
+
+/**
+ * Why a unit cannot be priced in a sales area: the sales area must be
+ * configured and active, the unit must exist, be active, have an active
+ * Sold-to and belong to the sales area (never the conditions of another
+ * market). Shared by the price determination and the document pricing.
+ */
+export function unitPricingViolations(
+  key: SalesAreaKey,
+  salesArea: SalesAreaWithCurrency | null,
+  unitId: string,
+  unit:
+    | (SalesAreaKey & {
+        isActive: boolean;
+        soldToCustomerNumber: string;
+        soldTo: { customer: { isActive: boolean } };
+      })
+    | null,
+): string[] {
+  const violations = salesAreaViolations(key, salesArea);
+  if (!unit) {
+    violations.push(`unitId ${unitId} does not exist`);
+    return violations;
+  }
+  if (!unit.isActive) violations.push(`unitId ${unitId} is inactive`);
+  if (!unit.soldTo.customer.isActive) {
+    violations.push(
+      `unitId ${unitId} has an inactive Sold-to ${unit.soldToCustomerNumber}`,
+    );
+  }
+  if (salesArea && !sameSalesArea(unit, key)) {
+    violations.push(unitNotInSalesArea(unitId, unit, key));
+  }
+  return violations;
+}
+
+/**
+ * The condition records that may apply to the materials, per material: the
+ * same query as the price determination (unit, Sold-to, list price of the
+ * sales area; active records, validity is checked by the evaluation).
+ */
+export async function loadCandidates(
+  db: Db,
+  key: SalesAreaKey,
+  materialNumbers: string[],
+  unit: { unitId: string; soldToCustomerNumber: string },
+): Promise<Map<string, ConditionCandidate[]>> {
+  const conditions = await db.priceCondition.findMany({
+    where: conditionFilter(key, materialNumbers, unit),
+    include: { conditionType: true },
+  });
+  const byMaterial = new Map<string, ConditionCandidate[]>(
+    materialNumbers.map((m) => [m, []]),
+  );
+  for (const condition of conditions) {
+    byMaterial.get(condition.materialNumber)?.push(toCandidate(condition));
+  }
+  return byMaterial;
 }
 
 /**
