@@ -148,3 +148,41 @@ the database, the apps and the logs. Delete the folder `C:\Temp\13a` if you
 created it. Check that `docker ps -a` lists no container starting with
 `b2b-browser-test-` (the development container `b2b-commerce-lab-postgres-1`
 stays untouched).
+
+## 6. Results of the manual acceptance (2026-11-06)
+
+Executed in the disposable acceptance environment, against the local
+commits up to `cb64320`.
+
+| ID | Test case | Manual result |
+| -- | --------- | ------------- |
+| P1 | Pricing procedure viewer | **Passed** |
+| P2 | Stuttgart pricing, 10695.00 EUR | **Passed** |
+| P3 | ZBP1 access sequence and price explanation | **Passed** |
+| P4 | München pricing and pricing-date validity | **Passed** |
+| P5 | Poland: INCOMPLETE, no conversion | **Skipped by the user** – not executed manually |
+| P6 | Japan: JPY without decimals | **Skipped by the user** – not executed manually |
+| P7 | Refusals like `POST /pricing/price` | **Skipped by the user** – not executed manually |
+| P8 | Released price check and orders unchanged | **Skipped by the user** – not executed manually |
+
+P5–P8 are not marked as passed. Their behavior is covered by automated
+tests only (not a substitute for the manual acceptance):
+
+- ERP integration tests `apps/erp-api/test/integration/document-pricing-api.int-spec.ts`
+  (Poland INCOMPLETE with message, JPY without decimals, refusals with the
+  same messages as `POST /pricing/price`, nothing stored) and
+  `pricing-procedures.int-spec.ts`; regression fixtures
+  `apps/erp-api/src/pricing/price-determination.regression.spec.ts`
+  against the released price determination.
+- Browser suite "Pricing procedures (Sprint 13A)" in
+  `apps/backoffice/test/browser/suites/pricing-procedures.mjs`.
+
+Automated results at the end of Sprint 13A: ERP 863 unit, 574 integration
+and 2 E2E tests; Backoffice 626; Shop 24; browser runner safety 33; full
+browser regression **273/273, run twice** (with and without a new build). All
+passed.
+
+Still open from Sprint 12C (`docs/testing/sprint-12c-manual-acceptance.md`):
+follow-up **A5** (password reset and the end of all sessions) is not
+explicitly confirmed, and **A6** (replaying a used reset link) was not
+executed manually.
