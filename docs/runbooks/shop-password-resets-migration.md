@@ -1,5 +1,8 @@
 # Runbook: migration 20261105090000_add_shop_password_resets (Sprint 12C)
 
+> **Superseded for the deployment:** migrations 11 and 12 are pending together;
+> use `sprint-12c-13a-migrations.md`. This file describes migration 11 alone.
+
 Adds the table for administrator-issued password reset links to the
 development database `b2b_erp`. Run it **only after explicit approval**.
 Nothing in this runbook is automated. Until then, `b2b_erp` keeps its 10
